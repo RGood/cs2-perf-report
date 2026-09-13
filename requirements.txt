@@ -1,0 +1,6 @@
+demoparser2>=0.40
+zstandard>=0.22
+pandas>=2.0
+numpy>=1.26
+pillow>=10.0
+tkinterdnd2>=0.4
