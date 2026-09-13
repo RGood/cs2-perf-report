@@ -18,6 +18,8 @@ Command line:
     make_report <path>             a .dem, .dem.zst, .zip, .gz or .bz2
 
 Reports land in `reports/` as `<map>_<date>_performance.html`, self-contained (open anywhere, share as a file).
+One page covers every player in the match: the top shows both teams with rounds won (green = winner, red = loser)
+and a tab per player with their average impact per round; click a tab to switch. `--player` picks the default tab.
 
 ## Install
 
@@ -36,7 +38,7 @@ FACEIT demos must be downloaded by you from the match room (login required). The
 |---|---|
 | `app.py` | Desktop app: drop zone, queue, progress, opens the report |
 | `cs2report.py` | CLI runner: find demo, decompress, fetch radar, build |
-| `performance_report.py` | The page: summary paragraph, average impact per round, round strip, chips, ranked lists, cards |
+| `performance_report.py` | The page: team headers, player tabs, and per player a summary paragraph, average impact per round, round strip, chips, ranked lists, cards (SVG over a shared radar) |
 | `mistake_report.py` | Things-to-improve rules, severity, shared demo parser and radar drawing |
 | `impact_report.py` | Things-to-keep-doing rules and impact scoring |
 | `maps/` | Radar PNGs (from the CS Demo Manager repo) and `offsets.json` (game overview offsets, 44 maps) |
@@ -57,6 +59,8 @@ Analysis rules worth knowing:
 - A grenade thrown too early counts only if it was thrown with no enemy within 30 m and none spotted, and was
   then missing during 4 s+ of contact later that round.
 - Untraded deaths are split into "isolated before dying" (movement created the gap) and "died anchoring".
+
+See `flag-catalog.md` for the full list of candidate flags and how each is detected.
 
 Thresholds are named constants at the top of `mistake_report.py` (`CONT_GAP`, `SPRAY_RUN`, `SAFE_WINDOW`) and in
 `severity()` / `impact()`. To add a rule: a `RULES` entry, a block in `detect()`, and a base weight.

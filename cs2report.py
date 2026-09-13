@@ -77,6 +77,32 @@ def map_of_demo(path):
     return DemoParser(path).parse_header().get('map_name', 'unknown')
 
 
+def run_with_progress(cmd, on_progress=None, on_line=None):
+    """Run the report script, forwarding PROGRESS lines to a callback (or drawing a text bar) and other lines to on_line/print."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    tail = []
+    for line in p.stdout:
+        line = line.rstrip()
+        if not line or 'Warning' in line: continue
+        if line.startswith('PROGRESS '):
+            _, pct, el, eta, msg = line.split(' ', 4)
+            pct, el, eta = int(pct), int(el), int(eta)
+            if on_progress: on_progress(pct, el, eta, msg)
+            else:
+                bar = '#' * (pct // 4) + '-' * (25 - pct // 4)
+                sys.stdout.write(f"\r[{bar}] {pct:3d}%  {el:3d}s elapsed, ~{eta:3d}s left  {msg:<45}"); sys.stdout.flush()
+                if pct >= 100: sys.stdout.write('\n')
+        else:
+            tail.append(line)
+            if on_line: on_line(line)
+            elif not on_progress: print(line)
+    p.wait()
+    if p.returncode != 0:
+        raise RuntimeError('\n'.join(tail[-12:]) or 'report script failed')
+    return tail
+
+
 def run(target, player, out, keep):
     # resolve to a .dem.zst or .dem path
     label = None
@@ -98,8 +124,7 @@ def run(target, player, out, keep):
     if not out:
         stamp = datetime.datetime.fromtimestamp(os.path.getmtime(src)).strftime('%Y-%m-%d')
         out = os.path.join(ROOT, f'{mapname[3:] if mapname.startswith("de_") else mapname}_{stamp}_performance.html')
-    r = subprocess.run([sys.executable, os.path.join(HERE, 'performance_report.py'), dem, '--player', player, '--out', out], capture_output=True, text=True)
-    print('\n'.join(l for l in r.stdout.splitlines() if 'Warning' not in l) or r.stderr[-800:])
+    run_with_progress([sys.executable, os.path.join(HERE, 'performance_report.py'), dem, '--player', player, '--out', out])
     if tmp and not keep:
         os.remove(tmp)
     elif tmp:

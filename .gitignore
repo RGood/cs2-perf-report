@@ -1,0 +1,9 @@
+# generated reports
+reports/
+# python
+__pycache__/
+*.pyc
+# local run-time cache and any demos left next to the scripts
+timings.json
+*.dem
+*.dem.zst

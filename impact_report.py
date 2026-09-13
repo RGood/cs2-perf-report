@@ -7,7 +7,7 @@ Usage:
 import sys, os, math, base64, argparse, collections as C
 import pandas as pd
 from PIL import ImageDraw
-from mistake_report import parse, make_map, _font, b64, nade_list, TICK, M
+from mistake_report import parse, make_map, _font, b64, nade_list, TICK, M, teammate_fights, REACTION_S, PEEK_S
 
 RULES = {
     'clutch': ("Clutch won",
@@ -49,13 +49,17 @@ RULES = {
     'saved_rifle': ("Saved the rifle",
         "Your team lost the round and you kept a rifle-value buy alive. Next round starts with a full kit instead of a force.",
         "Keep recognising the lost round early. One saved rifle changes the next round's buy for the whole team."),
+    'fight_support': ("Supported the fight",
+        "A teammate was fighting an enemy and you put damage on that enemy before the fight was decided. Two guns on one target is how duels stop being coin flips.",
+        "Keep joining your teammate's fight from the first shot. Even a few bullets of damage change who wins it."),
+    **__import__('positioning').RULES_POS,
     'died_tradeable': ("Death traded",
         "You died, and a teammate killed your killer within 5 seconds. Your position made the trade possible, so the death cost the enemy a player.",
         "Keep dying next to someone. If you are going to lose a fight, lose it inside trade range."),
 }
 
 BASE_IMPACT = {'clutch': 60, 'opening_kill': 50, 'retake_kill': 50, 'multi_kill': 45, 'flash_kill': 45, 'trade_kill': 45, 'good_anchor': 45,
-               'reposition_kill': 40, 'flash_assist': 35, 'util_damage': 35, 'survived_damage': 35, 'util_on_signal': 30, 'saved_rifle': 30, 'died_tradeable': 25}
+               'reposition_kill': 40, 'fight_support': 38, 'flash_assist': 35, **__import__('positioning').BASE_POS, 'util_damage': 35, 'survived_damage': 35, 'util_on_signal': 30, 'saved_rifle': 30, 'died_tradeable': 25}
 
 
 def impact(m):
@@ -77,6 +81,12 @@ def impact(m):
     if k == 'util_damage': add(min(10, int((m.get('dmg') or 0) // 20)), f"{m.get('dmg')} grenade damage")
     if k == 'survived_damage': add(min(10, int((m.get('dmg') or 0) // 40)), f"{m.get('dmg')} damage")
     if k == 'flash_kill': add(min(6, int(m.get('kills', 1) - 1) * 6), 'more than one blind kill')
+    if k == 'held_angle' and m.get('headshot'): add(3, 'headshot')
+    if k == 'rotated_on_info': add(min(10, int((m.get('dmg') or 0) // 25)), f"{m.get('dmg')} damage after arriving")
+    if k == 'fight_support':
+        add(min(10, int((m.get('dmg') or 0) // 20)), f"{m.get('dmg')} damage during the fight")
+        add(8 if m.get('enemy_died') else 0, 'the enemy died in that fight')
+        add(5 if m.get('mate_survived') else 0, 'your teammate survived it')
     if m.get('mates_alive') is not None and m.get('mates_alive') <= 1 and k in ('opening_kill', 'trade_kill', 'retake_kill', 'multi_kill', 'reposition_kill'): add(5, 'while outnumbered')
     return max(0, min(100, score)), br
 
@@ -239,6 +249,32 @@ def detect(D):
                     nades_after = int(((D['nades']['total_rounds_played'] == rn) & (D['nades']['tick'] >= (contact or t)) & (D['nades']['tick'] <= t)).sum())
                     if after >= 8 and (dmg_after >= 50 or nades_after):
                         card(t, 'good_anchor', pos, d.attacker_name, (d.attacker_X, d.attacker_Y), f"Round {rn+1}, {side}, {rt(t, rn)} s at {d.user_last_place_name}. Contact at {rt(contact, rn)} s with up to {foes_peak} attackers within 25 m; you lasted {after:.0f} s, did {dmg_after} damage and threw {nades_after} grenades after contact. Nearest teammate {md[0][1]} was {md[0][0]:.0f} m away.", place=d.user_last_place_name, victim_sid=d.attacker_steamid, dmg_after=dmg_after, nades_after=nades_after)
+    # supported a teammate's fight: damage on their opponent before the fight was decided
+    by_tick2 = by_tick; first_tick = int(min(by_tick2)); coarse_ticks = sorted(by_tick2)
+    def coarse2(tk):
+        c = tk - ((tk - first_tick) % 8)
+        return c if c in by_tick2 else max([x for x in coarse_ticks if x <= tk], default=first_tick)
+    for rn, ft in fz.items():
+        g0 = by_tick2.get(ft)
+        if g0 is None or not (g0['steamid'] == me).any(): continue
+        team = int(g0[g0['steamid'] == me].iloc[0]['team_num']); side = 'CT' if team == 3 else 'T'
+        won = D['winner'].get(rn) == side
+        rd = deaths[deaths['total_rounds_played'] == rn]
+        # fights where the teammate died (helper) plus fights the teammate won: approximate the latter from hurt pairs
+        hh = hurt[(hurt['total_rounds_played'] == rn) & (hurt['attacker_steamid'] == me)]
+        seen_pairs = set()
+        for f in teammate_fights(D, me, by_tick2, coarse2, rn, team):
+            if f['dmg_before'] <= 0: continue
+            key = (f['mate_sid'], f['enemy_sid'], f['t_start'] // 64)
+            if key in seen_pairs: continue
+            seen_pairs.add(key)
+            e_died = bool(((rd['user_steamid'] == f['enemy_sid']) & (rd['tick'] <= f['t_death'] + 5 * TICK)).any())
+            t = f['t_death']
+            card(t, 'fight_support', f['my_pos'], f['enemy'], f['e_pos'],
+                 f"Round {rn+1}, {side}, {rt(t, rn)} s. {f['mate']} fought {f['enemy']} for {f['dur']:.1f} s; you did {f['dmg_before']} damage to {f['enemy']} during the fight from {f['min_dist']:.0f} m at {f['my_place']}." + (f" {f['enemy']} died." if e_died else '') + (f" {f['mate']} still died." if True else ''),
+                 place=f['my_place'], victim_sid=f['enemy_sid'], dmg=f['dmg_before'], enemy_died=e_died, mate_survived=False, extra_pos=f['mate_pos'], extra_label=f"{f['mate']} died")
+    import positioning
+    out.extend(positioning.positives(D, me))
     return out
 
 
@@ -266,7 +302,7 @@ def draw_card(base, proj, m):
         d.line([(kx, ky), (mx, my)], fill=(255, 170, 60), width=1)
         d.polygon([(kx, ky - 9), (kx - 8, ky + 6), (kx + 8, ky + 6)], fill=(255, 170, 60)); d.text((kx + 10, ky - 8), f"{m.get('victim') or ''}", fill=(255, 200, 120), font=small)
     if m.get('extra_pos'):
-        ex, ey = proj(*m['extra_pos']); d.ellipse((ex - 6, ey - 6, ex + 6, ey + 6), outline=(120, 255, 120), width=2); d.text((ex + 9, ey - 8), "earlier kill", fill=(140, 255, 140), font=small)
+        ex, ey = proj(*m['extra_pos']); d.ellipse((ex - 6, ey - 6, ex + 6, ey + 6), outline=(120, 255, 120), width=2); d.text((ex + 9, ey - 8), m.get('extra_label', 'earlier kill'), fill=(140, 255, 140), font=small)
     mx, my = proj(*m['pos'])
     d.ellipse((mx - 8, my - 8, mx + 8, my + 8), fill=(70, 220, 110), outline=(255, 255, 255), width=2); d.text((mx + 12, my + 4), "you", fill=(150, 255, 170), font=small)
     sc = m.get('impact', 0); col = imp_rgb(sc)

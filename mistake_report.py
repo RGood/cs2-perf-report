@@ -14,6 +14,7 @@ from demoparser2 import DemoParser
 
 TICK = 64
 M = 0.0254  # units -> metres
+PROGRESS = lambda pct, msg: None   # set by the caller to receive (percent, message)
 CONT_GAP = 10   # ticks (~0.16 s): shots closer together than this are one continuous run (AK/M4 cycle ~6-7 ticks)
 SPRAY_RUN = 7   # a continuous run this long or longer is a spray; shorter runs are bursts
 SAFE_WINDOW = 1.5  # seconds after contact during which no enemy could engage you, needed before a held grenade counts as usable
@@ -56,6 +57,10 @@ RULES = {
     'util_on_timer': ("Utility on a timer",
         "The same grenade from the same spot at the same second every round tells the enemy where you stand and when the choke is covered. They time their push to it.",
         "Throw on sound and on information, not on the clock. Some rounds throw nothing before 20 s and hold the angle instead."),
+    'late_support': ("Late support",
+        "A teammate was fighting an enemy you could have shot. You waited, they died, and only then did you engage the same enemy. Allowing 0.4 s to react and 0.6 s to swing, there was still time to help before they died.",
+        "When a teammate takes a fight you can see or peek, you are in that fight from the first shot. Joining a second earlier turns a death into a 2v1."),
+    **__import__('positioning').RULES_NEG,
     'zero_impact_full_buy': ("Full buy, zero impact",
         "A full buy that ends with no damage and no grenades thrown is the most expensive possible round. The money was spent and nothing was bought with it.",
         "If the round is going badly, your grenades still have value: throw them for a teammate or for the retake. Get damage in before you die."),
@@ -65,6 +70,7 @@ RULES = {
 def parse(path, me):
     p = DemoParser(path)
     mapname = p.parse_header().get('map_name', '?')
+    PROGRESS(4, 'reading events')
     ms = p.parse_event("round_announce_match_start")
     start = int(ms['tick'].max()) if len(ms) else 0
 
@@ -79,7 +85,7 @@ def parse(path, me):
     freeze = ev("round_freeze_end"); rend = ev("round_end")
     fz = {int(r.total_rounds_played): int(r.tick) for r in freeze.itertuples()}
     winner = {int(r.total_rounds_played) - 1: r.winner for r in rend.itertuples()}
-    deaths = ev("player_death", player=["X", "Y", "Z", "last_place_name", "team_num", "flash_duration", "active_weapon_name"]).sort_values('tick')
+    deaths = ev("player_death", player=["X", "Y", "Z", "last_place_name", "team_num", "flash_duration", "active_weapon_name", "health"]).sort_values('tick')
     hurt = ev("player_hurt")
     fire = ev("weapon_fire", player=["X", "Y", "last_place_name"])
     blind = ev("player_blind", player=["team_num"])
@@ -94,7 +100,9 @@ def parse(path, me):
     death_ticks = [int(t) - 1 for t in deaths['tick']]
     coarse = list(range(start, int(deaths['tick'].max()) + 1, 8))
     nade_ticks = [int(t) for t in all_nades['tick']]
-    snap = p.parse_ticks(["X", "Y", "is_alive", "team_num", "last_place_name", "inventory", "current_equip_value", "spotted"], ticks=sorted(set(coarse + death_ticks + nade_ticks + list(fz.values()))))
+    PROGRESS(12, 'reading player positions for every tick')
+    snap = p.parse_ticks(["X", "Y", "is_alive", "team_num", "last_place_name", "inventory", "current_equip_value", "spotted", "approximate_spotted_by", "flash_duration", "yaw", "velocity"], ticks=sorted(set(coarse + death_ticks + nade_ticks + list(fz.values()))))
+    PROGRESS(30, 'positions read')
     snap['steamid'] = snap['steamid'].astype(str)
     round_end = {int(r.total_rounds_played) - 1: int(r.tick) for r in rend.itertuples()}
     return dict(map=mapname, fz=fz, winner=winner, round_end=round_end, deaths=deaths, hurt=hurt, gunfire=gunfire, nades=nades, all_nades=all_nades, blind=blind, plant=plant, snap=snap, me=me)
@@ -104,6 +112,76 @@ def for_player(D, sid):
     """Return a shallow copy of a parsed demo focused on another player (same snapshot, their grenades)."""
     E = dict(D); E['me'] = str(sid); E['nades'] = D['all_nades'][D['all_nades']['user_steamid'] == str(sid)]
     return E
+
+
+
+# ----------------------------------------------------------------------------- teammate-fight analysis (shared by both sides)
+REACTION_S = 0.4      # reasonable reaction time before support could begin
+PEEK_S = 0.6          # time to swing and get the crosshair on the enemy
+SUPPORT_RANGE_M = 30  # beyond this you could not realistically have joined
+PEEK_RANGE_M = 20     # within this you could have peeked even without line of sight
+
+
+def teammate_fights(D, me, by_tick, coarse, rn, team):
+    """For each teammate death in round rn: the fight window, my ability to help, and when I actually engaged the killer.
+    Returns a list of dicts (one per teammate death where the killer is an enemy)."""
+    deaths = D['deaths']; hurt = D['hurt']; fire = D['gunfire']
+    rd = deaths[(deaths['total_rounds_played'] == rn)].sort_values('tick')
+    out = []
+    for d in rd[(rd['user_team_num'] == team) & (rd['user_steamid'] != me)].itertuples():
+        E = str(d.attacker_steamid); T = str(d.user_steamid); t_death = int(d.tick)
+        if E in ('nan', 'None', '') or E == T: continue
+        # was I alive at the death?
+        g = by_tick.get(coarse(t_death - 1))
+        if g is None: continue
+        mr = g[g['steamid'] == me]
+        if not len(mr) or not bool(mr.iloc[0]['is_alive']): continue
+        # fight window: first damage between T and E in the 6 s before the death
+        hh = hurt[(hurt['total_rounds_played'] == rn) & (hurt['tick'] >= t_death - 6 * TICK) & (hurt['tick'] <= t_death) &
+                  (((hurt['attacker_steamid'] == E) & (hurt['user_steamid'] == T)) | ((hurt['attacker_steamid'] == T) & (hurt['user_steamid'] == E)))]
+        t_start = int(hh['tick'].min()) if len(hh) else t_death
+        dur = (t_death - t_start) / TICK
+        # my own fights during the window (excluding E): hurt events with me as attacker or victim, other party not E
+        mine = hurt[(hurt['total_rounds_played'] == rn) & (hurt['tick'] >= t_start - TICK) & (hurt['tick'] <= t_death) &
+                    (((hurt['attacker_steamid'] == me) & (hurt['user_steamid'] != E)) | ((hurt['user_steamid'] == me) & (hurt['attacker_steamid'] != E)))]
+        busy = len(mine) > 0
+        # my damage on E before the death, and my first engagement of E (damage, or a shot while E was in my view)
+        dmg_before = int(hurt[(hurt['total_rounds_played'] == rn) & (hurt['attacker_steamid'] == me) & (hurt['user_steamid'] == E) & (hurt['tick'] >= t_start) & (hurt['tick'] < t_death)]['dmg_health'].clip(upper=100).sum())
+        after = hurt[(hurt['total_rounds_played'] == rn) & (hurt['attacker_steamid'] == me) & (hurt['user_steamid'] == E) & (hurt['tick'] >= t_death) & (hurt['tick'] <= t_death + 4 * TICK)]
+        t_engage = int(after['tick'].min()) if len(after) else None
+        # my situation across the window, sampled on coarse ticks
+        saw_from = None; min_dist = None; blind = False; my_pos = None; my_place = None; e_pos = None
+        for ct in range(coarse(t_start), t_death + 1, 8):
+            g = by_tick.get(ct)
+            if g is None: continue
+            mr = g[g['steamid'] == me]; er = g[g['steamid'] == E]
+            if not len(mr) or not len(er): continue
+            mr = mr.iloc[0]; er = er.iloc[0]
+            dist = math.dist((mr.X, mr.Y), (er.X, er.Y)) * M
+            if min_dist is None or dist < min_dist: min_dist = dist
+            if (mr['flash_duration'] or 0) > 0.5: blind = True
+            spot = er['approximate_spotted_by']
+            try:
+                seen = me in [str(x) for x in spot]
+            except TypeError:
+                seen = False
+            if seen and saw_from is None and ct >= t_start + int(REACTION_S * TICK) and ct <= t_death - int(0.5 * TICK): saw_from = ct
+            my_pos = (mr.X, mr.Y); my_place = mr['last_place_name']; e_pos = (er.X, er.Y)
+        if not t_engage:
+            # a shot fired at E counts as engaging if E was in my view at the time
+            ff = fire[(fire['total_rounds_played'] == rn) & (fire['user_steamid'] == me) & (fire['tick'] >= t_death) & (fire['tick'] <= t_death + 4 * TICK)]
+            for r in ff.itertuples():
+                g = by_tick.get(coarse(int(r.tick))); er = g[g['steamid'] == E] if g is not None else None
+                if er is not None and len(er):
+                    try:
+                        if me in [str(x) for x in er.iloc[0]['approximate_spotted_by']]: t_engage = int(r.tick); break
+                    except TypeError:
+                        pass
+        out.append(dict(mate=str(d.user_name), mate_sid=T, enemy=str(d.attacker_name), enemy_sid=E, t_start=t_start, t_death=t_death, dur=dur,
+                        busy=busy, blind=blind, dmg_before=dmg_before, t_engage=t_engage, saw_from=saw_from, min_dist=min_dist,
+                        my_pos=my_pos, my_place=my_place, e_pos=e_pos, mate_pos=(d.user_X, d.user_Y), mate_place=str(d.user_last_place_name),
+                        enemy_hp=int(d.attacker_health) if pd.notna(d.attacker_health) else None))
+    return out
 
 # ----------------------------------------------------------------------------- mistake detection
 def nade_list(inv):
@@ -268,6 +346,36 @@ def detect(D):
                             path=[(x.X, x.Y) for x in mine[(mine.index >= ft) & (mine.index <= int(dd['tick']))].itertuples()][::4], mates_alive=None, nades_thrown=[], won=D['winner'].get(rn) == side,
                             kind='zero_impact_full_buy', facts=f"Round {rn+1}, {side}. Equipment ${int(r['current_equip_value'])}, {len(nade_list(r['inventory']))} grenades bought, none thrown, 0 damage, died at {dd['user_last_place_name']} at {rt(int(dd['tick']), rn)} s."))
 
+    # late support: a teammate's fight I could have joined but only engaged after they died
+    first_tick = int(min(by_tick)); coarse_ticks = sorted(by_tick)
+    def coarse(tk):
+        c = tk - ((tk - first_tick) % 8)
+        return c if c in by_tick else max([x for x in coarse_ticks if x <= tk], default=first_tick)
+    for rn, ft in fz.items():
+        g0 = by_tick.get(ft)
+        if g0 is None or not (g0['steamid'] == me).any(): continue
+        team = int(g0[g0['steamid'] == me].iloc[0]['team_num']); side = 'CT' if team == 3 else 'T'
+        for f in teammate_fights(D, me, by_tick, coarse, rn, team):
+            usable = f['dur'] - REACTION_S - PEEK_S
+            if usable < 0.4 or f['busy'] or f['blind'] or f['min_dist'] is None or f['min_dist'] > SUPPORT_RANGE_M: continue
+            if f['dmg_before'] > 0 or not f['t_engage']: continue
+            saw = f['saw_from'] is not None
+            if not saw and f['min_dist'] > PEEK_RANGE_M: continue
+            t = f['t_death']
+            pt = mine[(mine.index >= t - 12 * TICK) & (mine.index <= t)]
+            facts = (f"Round {rn+1}, {side}, {rt(t, rn)} s. {f['mate']} fought {f['enemy']} for {f['dur']:.1f} s ({rt(f['t_start'], rn)} s to {rt(t, rn)} s) and died at {f['mate_place']}. "
+                     f"You were {f['min_dist']:.0f} m from {f['enemy']} at {f['my_place']}, not in a fight and not flashed. "
+                     + (f"{f['enemy']} had you in view from {rt(f['saw_from'], rn)} s. " if saw else f"You had no line of sight but were within {PEEK_RANGE_M} m and could have peeked. ")
+                     + f"You did no damage during the fight and first engaged {f['enemy']} {(f['t_engage'] - t) / TICK:.1f} s after {f['mate']} died"
+                     + (f"; {f['enemy']} had {f['enemy_hp']} hp left." if f['enemy_hp'] is not None else '.'))
+            out.append(dict(round=rn + 1, side=side, time=rt(t, rn), z=None, place=f['my_place'], pos=f['my_pos'], killer=f['enemy'], kpos=f['e_pos'], kplace=None,
+                            weapon=None, my_weapon=None, dist=round(f['min_dist'], 1), near=(math.dist(f['my_pos'], f['mate_pos']) * M, f['mate'], f['mate_pos'], f['mate_place']),
+                            path=[(r.X, r.Y) for r in pt.itertuples()], killer_path=[], mate_path=[], mates_alive=None, nades_thrown=[], won=D['winner'].get(rn) == side,
+                            kind='late_support', facts=facts, saw=saw, spare_s=usable, enemy_hp=f['enemy_hp'], extra_pos=f['mate_pos'], extra_label=f"{f['mate']} died"))
+
+    import positioning
+    out.extend(positioning.negatives(D, me))
+
     # utility on a timer: same nade type + place + side, within 1.5 s spread, in >= 4 rounds
     groups = C.defaultdict(list)
     for r in D['nades'].itertuples():
@@ -290,7 +398,8 @@ def detect(D):
 BASE_SEVERITY = {
     'zero_impact_full_buy': 55, 'lost_opener_ct': 55, 'separated_from_team': 50, 'early_solo_contact': 50,
     'kill_then_die': 42, 'util_too_early': 42, 'util_unused': 38, 'spray_at_range': 38, 'died_blind': 36, 'util_on_timer': 38,
-    'missed_at_range': 33, 'held_alone': 32, 'eco_wander': 28,
+    'missed_at_range': 33, 'held_alone': 32, 'eco_wander': 28, 'late_support': 45,
+    **__import__('positioning').BASE_NEG,
 }
 
 def severity(m):
@@ -317,6 +426,13 @@ def severity(m):
     if k == 'separated_from_team' and m.get('moved10'): add(min(8, int(m['moved10'] // 4)), f"moved {m['moved10']:.0f} m away in the last 10 s")
     if k == 'util_on_timer': add(min(16, 4 * (m.get('repeats', 4) - 4)), f"repeated in {m.get('repeats')} rounds")
     if k in ('spray_at_range', 'missed_at_range', 'held_alone') and (m.get('foes_peak') or 0) >= 3: add(-5, 'outnumbered 3+ at the time')
+    if k == 'crossfire': add(min(8, 4 * (m.get('n_seen', 2) - 2)), f"{m.get('n_seen')} enemies had you in view")
+    if k == 'swung_into_hold': add(5 if (m.get('k_aim') or 99) <= 8 else 0, 'they were already dead-on you')
+    if k == 'seen_first': add(min(8, int((m.get('lead') or 0) * 2)), f"seen {m.get('lead', 0):.1f} s before you saw them")
+    if k == 'late_support':
+        add(6 if m.get('saw') else 0, 'you had the enemy in view during the fight')
+        add(min(8, int((m.get('spare_s') or 0) * 4)), f"{m.get('spare_s', 0):.1f} s of usable time before the death")
+        add(5 if (m.get('enemy_hp') or 0) >= 80 else 0, 'the enemy was barely damaged when your teammate died')
     score = max(0, min(100, score))
     return score, br
 
@@ -416,7 +532,7 @@ def draw_card(base, proj, m):
         d.polygon([(kx, ky - 9), (kx - 8, ky + 6), (kx + 8, ky + 6)], fill=(255, 170, 60))
         d.text((kx + 10, ky - 8), f"{m['killer']}", fill=(255, 200, 120), font=small)
     if m.get('extra_pos'):
-        ex, ey = proj(*m['extra_pos']); d.ellipse((ex - 6, ey - 6, ex + 6, ey + 6), outline=(120, 255, 120), width=2); d.text((ex + 9, ey - 8), "your kill", fill=(140, 255, 140), font=small)
+        ex, ey = proj(*m['extra_pos']); d.ellipse((ex - 6, ey - 6, ex + 6, ey + 6), outline=(120, 255, 120), width=2); d.text((ex + 9, ey - 8), m.get('extra_label', 'your kill'), fill=(140, 255, 140), font=small)
     mx, my = proj(*m['pos'])
     d.line([(mx - 9, my - 9), (mx + 9, my + 9)], fill=(255, 60, 60), width=4); d.line([(mx - 9, my + 9), (mx + 9, my - 9)], fill=(255, 60, 60), width=4)
     d.text((mx + 12, my + 4), "you", fill=(255, 120, 120), font=small)

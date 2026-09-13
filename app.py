@@ -58,7 +58,7 @@ def decompress(src, workdir):
     raise ValueError(f'unsupported file type: {base}')
 
 
-def build_report(src, log):
+def build_report(src, log, on_progress=None):
     """Decompress, generate, return the report path."""
     import cs2report
     workdir = HERE
@@ -74,14 +74,12 @@ def build_report(src, log):
         n = 2
         while os.path.exists(out) and os.path.getmtime(out) > os.path.getmtime(src) + 1 and _different_demo(out, dem):
             out = os.path.join(ROOT, f'{short}_{stamp}_{n}_performance.html'); n += 1
-        log('  parsing demo and building report (20 to 60 s) ...')
-        r = subprocess.run([sys.executable, os.path.join(HERE, 'performance_report.py'), dem, '--player', PLAYER, '--out', out],
-                           capture_output=True, text=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        lines = [l for l in r.stdout.splitlines() if 'Warning' not in l]
-        if r.returncode != 0:
-            raise RuntimeError(r.stderr.strip()[-1500:] or 'report script failed')
-        for l in lines[:1]:
-            log('  ' + l.split(' -> ')[0])
+        log('  building report ...')
+        lines = cs2report.run_with_progress([sys.executable, os.path.join(HERE, 'performance_report.py'), dem, '--player', PLAYER, '--out', out],
+                                            on_progress=on_progress, on_line=lambda l: None)
+        for l in lines:
+            if ' -> ' in l: log('  ' + l.split(' -> ')[0])
+            if l.startswith('built in'): log('  ' + l)
         return out
     finally:
         if temp and os.path.exists(dem):
@@ -138,7 +136,8 @@ class App:
         tk.Checkbutton(row, text='Open in browser when done', variable=self.open_var, fg='#cfd3dc', bg='#111318', selectcolor='#1d2130',
                        activebackground='#111318', activeforeground='#cfd3dc').pack(side='right')
 
-        self.prog = ttk.Progressbar(self.root, mode='indeterminate'); self.prog.pack(fill='x', padx=16, pady=(10, 4))
+        self.prog = ttk.Progressbar(self.root, mode='determinate', maximum=100); self.prog.pack(fill='x', padx=16, pady=(10, 2))
+        self.status = tk.Label(self.root, text='', fg='#9aa0ad', bg='#111318', font=('Segoe UI', 9), anchor='w'); self.status.pack(fill='x', padx=16, pady=(0, 4))
         self.log = tk.Text(self.root, height=10, bg='#0d0f13', fg='#cfd3dc', insertbackground='#cfd3dc', font=('Consolas', 9), relief='flat', wrap='word')
         self.log.pack(fill='both', expand=True, padx=16, pady=(0, 14))
         self.log.configure(state='disabled')
@@ -154,8 +153,12 @@ class App:
         try:
             while True:
                 msg = self.q.get_nowait()
-                if msg == '__busy__': self.prog.start(12); self.busy = True
-                elif msg == '__idle__': self.prog.stop(); self.busy = False
+                if msg == '__busy__': self.prog['value'] = 0; self.status.configure(text='starting ...'); self.busy = True
+                elif msg == '__idle__': self.prog['value'] = 100; self.busy = False
+                elif isinstance(msg, tuple) and msg[0] == '__progress__':
+                    _, pct, el, eta, text = msg
+                    self.prog['value'] = pct
+                    self.status.configure(text=f"{pct}%  ·  {text}  ·  {el} s elapsed, about {eta} s left" if pct < 100 else f"done in {el} s")
                 else:
                     self.log.configure(state='normal'); self.log.insert('end', msg + '\n'); self.log.see('end'); self.log.configure(state='disabled')
         except queue.Empty:
@@ -199,7 +202,7 @@ class App:
             src = self.jobs.get()
             self.write('__busy__')
             try:
-                out = build_report(src, self.write)
+                out = build_report(src, self.write, on_progress=lambda pct, el, eta, text: self.q.put(('__progress__', pct, el, eta, text)))
                 self.write(f'  done: {out}')
                 if self.open_var.get():
                     webbrowser.open('file:///' + out.replace('\\', '/'))
