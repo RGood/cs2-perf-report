@@ -7,3 +7,7 @@ __pycache__/
 timings.json
 *.dem
 *.dem.zst
+# temp decompressed demos from the app
+tmp/
+# per-user settings (Steam profile)
+settings.json

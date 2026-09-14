@@ -29,8 +29,8 @@ RULES = {
         "Your flash blinded an enemy that a teammate then killed. Utility thrown for someone else is the highest-leverage grenade you have.",
         "Keep throwing flashes for the teammate who is peeking, and call it so they swing on it."),
     'trade_kill': ("Trade kill",
-        "A teammate died and you killed their killer within 5 seconds. The enemy's kill cost them a player, which is what good spacing is for.",
-        "Keep positioning inside trade range of the teammate who is about to take the fight."),
+        "A teammate died and you killed their killer within 5 seconds. It counts for more when the teammate held the killer's attention: when you first shot at the killer they were still aimed well away from you (30° or more), so you had a free shot. It counts for less when they were already aimed within 15° of you.",
+        "Keep positioning inside trade range of the teammate who is about to take the fight, and come in from off their killer's aim."),
     'good_anchor': ("Anchor held with value",
         "Holding a site alone against a hit, you lasted 8 s or more after contact and did damage or used utility in that time. That is the anchor's job done.",
         "Keep this order under pressure: call, delay grenade, damage, fall back. The round is decided by what the retake inherits."),
@@ -41,8 +41,8 @@ RULES = {
         "An HE or molotov did 30 or more damage this round. Damage from utility is free: no duel, no exposure.",
         "Keep the same throws for the same stacks and chokes. Grenade damage before the fight makes the fight easier."),
     'util_on_signal': ("Utility on a signal",
-        "A smoke or molotov thrown while two or more enemies were within 30 metres, in a round you won. Thrown on information, not on the clock.",
-        "Keep waiting for the signal before the delay grenade goes out. This is the throw that costs the enemy time."),
+        "A grenade thrown on information (an enemy your team had spotted near where it landed, enemy gunfire nearby, or an enemy close enough to hear) that then did something measurable: a flash blinded an enemy for a second or more, an HE or molotov did damage, or a smoke or molotov held back enemies who were approaching it and never came through while it was up.",
+        "Keep pairing the signal with the throw. Utility thrown on information and landing where the enemy actually is costs them time, health, or vision; the same grenade on the clock costs you the grenade."),
     'survived_damage': ("High damage, survived",
         "100 or more damage in a round you also survived. Damage without a death is the best possible round for the economy and the numbers.",
         "Keep taking fights from positions where losing the first exchange does not mean dying."),
@@ -53,13 +53,14 @@ RULES = {
         "A teammate was fighting an enemy and you put damage on that enemy before the fight was decided. Two guns on one target is how duels stop being coin flips.",
         "Keep joining your teammate's fight from the first shot. Even a few bullets of damage change who wins it."),
     **__import__('positioning').RULES_POS,
+    **__import__('flags_extra').RULES_POS,
     'died_tradeable': ("Death traded",
-        "You died, and a teammate killed your killer within 5 seconds. Your position made the trade possible, so the death cost the enemy a player.",
-        "Keep dying next to someone. If you are going to lose a fight, lose it inside trade range."),
+        "You died, and a teammate killed your killer within 5 seconds. It is a real trade when your fight held the killer's attention: when the trader first shot at the killer, the killer was still aimed well away from the trader (30° or more), so the trader had a free shot. It counts for less when the killer was already aimed within 15° of the trader.",
+        "Keep dying next to someone, and make the fight last: the longer the killer's aim stays on you, the easier the trade."),
 }
 
-BASE_IMPACT = {'clutch': 60, 'opening_kill': 50, 'retake_kill': 50, 'multi_kill': 45, 'flash_kill': 45, 'trade_kill': 45, 'good_anchor': 45,
-               'reposition_kill': 40, 'fight_support': 38, 'flash_assist': 35, **__import__('positioning').BASE_POS, 'util_damage': 35, 'survived_damage': 35, 'util_on_signal': 30, 'saved_rifle': 30, 'died_tradeable': 25}
+BASE_IMPACT = {'clutch': 60, 'opening_kill': 50, 'retake_kill': 50, 'multi_kill': 45, 'flash_kill': 40, 'trade_kill': 42, 'good_anchor': 40,
+               'reposition_kill': 20, 'fight_support': 35, 'flash_assist': 32, **__import__('positioning').BASE_POS, **__import__('flags_extra').BASE_POS, 'util_damage': 30, 'survived_damage': 25, 'util_on_signal': 20, 'saved_rifle': 25, 'died_tradeable': 25}
 
 
 def impact(m):
@@ -68,8 +69,9 @@ def impact(m):
         nonlocal score
         if v:
             score += v; br.append(f"{v:+d} {why}")
-    if m.get('won') is True: add(10, 'round won')
-    elif m.get('won') is False: add(-10, 'round still lost')
+    rm = int(round(min(10, max(3, 0.25 * BASE_IMPACT.get(k, 35)))))
+    if m.get('won') is True: add(rm, 'round won')
+    elif m.get('won') is False: add(-rm, 'round still lost')
     if k == 'clutch': add(12 * (m.get('vs', 1) - 1), f"1v{m.get('vs')}")
     if k == 'multi_kill': add(10 * (m.get('kills', 2) - 2), f"{m.get('kills')} kills")
     if k in ('opening_kill', 'flash_kill', 'trade_kill', 'retake_kill', 'reposition_kill') and m.get('headshot'): add(3, 'headshot')
@@ -79,6 +81,16 @@ def impact(m):
         add(min(10, int((m.get('dmg_after') or 0) // 25)), f"{m.get('dmg_after')} damage after contact")
         add(5 if m.get('nades_after') else 0, 'utility thrown after contact')
     if k == 'util_damage': add(min(10, int((m.get('dmg') or 0) // 20)), f"{m.get('dmg')} grenade damage")
+    if k in ('died_tradeable', 'trade_kill'):
+        if m.get('att_held'): add(10 if k == 'died_tradeable' else 8, f"the killer was aimed {m.get('turn_deg'):.0f}° away from the trader when the trader first shot at them")
+        elif m.get('att_prepared'): add(-10 if k == 'died_tradeable' else -8, f"the killer was already aimed within {m.get('turn_deg'):.0f}° of the trader when the trader first shot at them")
+    if k == 'util_on_signal':
+        add(min(18, 6 * (m.get('n_blinded') or 0)), f"{m.get('n_blinded')} enemies blinded for a second or more")
+        add(8 if m.get('killed_blind') else 0, 'an enemy died while blind')
+        add(min(12, int((m.get('dmg') or 0) // 10)), f"{m.get('dmg')} damage from it")
+        add(min(16, 8 * (m.get('n_held') or 0)), f"held {m.get('n_held')} approaching enemies")
+        add(-8 * (m.get('n_mates_blinded') or 0), f"blinded {m.get('n_mates_blinded')} teammates")
+        add(-4 * (m.get('n_crossed') or 0), f"{m.get('n_crossed')} enemies pushed through it anyway")
     if k == 'survived_damage': add(min(10, int((m.get('dmg') or 0) // 40)), f"{m.get('dmg')} damage")
     if k == 'flash_kill': add(min(6, int(m.get('kills', 1) - 1) * 6), 'more than one blind kill')
     if k == 'held_angle' and m.get('headshot'): add(3, 'headshot')
@@ -101,11 +113,50 @@ def imp_css(score):
 
 def detect(D):
     me = D['me']; fz = D['fz']; deaths = D['deaths']; snap = D['snap']; hurt = D['hurt']; blind = D['blind']; plant = D['plant']
-    by_tick = {t: g for t, g in snap.groupby('tick')}
+    from mistake_report import by_tick_of
+    by_tick = by_tick_of(D)
     first_tick = int(min(by_tick)); coarse_ticks = sorted(by_tick)
     def coarse(t):
         c = t - ((t - first_tick) % 8)
         return c if c in by_tick else max([x for x in coarse_ticks if x <= t], default=None)
+    def wrap(a): return abs(((a + 180) % 360) - 180)
+    def spot(v):
+        try: return set(str(x) for x in v)
+        except TypeError: return set()
+    def attention(killer, trader, t_death, t_trade, kname, tname, victim_word):
+        """Did the victim hold the killer's attention for the trade? The measure is the angle between the killer's view direction and the
+        trader at the tick the trader first got sight of the killer (the killer's approximate_spotted_by lists the trader). A large angle
+        means the trader had a free shot at a killer still looking elsewhere; a small one means the killer was already set on them."""
+        killer, trader = str(killer), str(trader)
+        def off(tick):
+            g = by_tick.get(tick) if tick in by_tick else by_tick.get(coarse(tick))
+            if g is None: return None
+            kr = g[g['steamid'] == killer]; tr = g[g['steamid'] == trader]
+            if not len(kr) or not len(tr) or not (kr.iloc[0]['yaw'] == kr.iloc[0]['yaw']): return None
+            b = math.degrees(math.atan2(tr.iloc[0].Y - kr.iloc[0].Y, tr.iloc[0].X - kr.iloc[0].X))
+            return wrap(b - float(kr.iloc[0]['yaw']))
+        # the moment that counts: the trader's first shot aimed within 15 degrees of the killer
+        t_spot = None; basis = 'first shot at them'
+        gf = D['gunfire']; shots = gf[(gf['user_steamid'] == trader) & (gf['tick'] >= t_death - 3 * TICK) & (gf['tick'] <= t_trade)].sort_values('tick')
+        for s_ in shots.itertuples():
+            if not (s_.user_yaw == s_.user_yaw): continue
+            g = by_tick.get(coarse(int(s_.tick)))
+            if g is None: continue
+            kr = g[g['steamid'] == killer]
+            if not len(kr): continue
+            b = math.degrees(math.atan2(kr.iloc[0].Y - s_.user_Y, kr.iloc[0].X - s_.user_X))
+            if wrap(b - float(s_.user_yaw)) < 15: t_spot = int(s_.tick); break
+        off_end = off(t_trade)
+        off_spot = off(t_spot) if t_spot is not None else None
+        key = off_spot if off_spot is not None else off_end
+        if key is None: return {}, ''
+        held = key >= 30; prepared = key < 15
+        react = (t_trade - t_spot) / TICK if t_spot is not None else None
+        when = '' if t_spot is None else (f"{(t_spot - t_death) / TICK:.1f} s after {victim_word} died" if t_spot >= t_death else f"{(t_death - t_spot) / TICK:.1f} s before {victim_word} died")
+        end_txt = f" ({off_end:.0f}° off at the trade shot)" if off_end is not None else ''
+        if t_spot is None: txt = f"No shot by {tname} aimed at {kname} was found before the trade; at the trade shot {kname} was aimed {key:.0f}° away from {tname}."
+        else: txt = f"When {tname} first shot at {kname} ({when}), {kname} was aimed {off_spot:.0f}° away from {tname}; the trade came {react:.1f} s later{end_txt}."
+        return dict(turn_deg=key, view_off_end=off_end, att_react=react, att_held=held, att_prepared=prepared, att_spotted_before=(t_spot is not None and t_spot < t_death)), txt
     mine = snap[snap['steamid'] == me].set_index('tick')
     rt = lambda tick, rn: round((tick - fz[rn]) / TICK, 1) if rn in fz else None
     def path_of(sid, t):
@@ -130,6 +181,7 @@ def detect(D):
         ft = fz[rn]; g = by_tick.get(ft)
         if g is None or not (g['steamid'] == me).any(): continue
         me0 = g[g['steamid'] == me].iloc[0]; team = int(me0['team_num']); side = 'CT' if team == 3 else 'T'
+        if team not in (2, 3): continue
         won = D['winner'].get(rn) == side
         rd = deaths[deaths['total_rounds_played'] == rn].sort_values('tick')
         rk = rd[rd['attacker_steamid'] == me]; rdm = rd[rd['user_steamid'] == me]
@@ -143,6 +195,7 @@ def detect(D):
         common = dict(round=rn + 1, side=side, won=won, equip=equip)
 
         def card(t, kind, pos, victim=None, vpos=None, facts='', **extra):
+            if rt(t, rn) is None or rt(t, rn) < 0: return    # pre-round artefacts (pauses, knife rounds)
             ma, fo, md, mp = state(t, team)
             near = md[0] if md else None
             c = dict(common, kind=kind, time=rt(t, rn), pos=pos, place=extra.pop('place', None), victim=victim, vpos=vpos, z=extra.pop('z', None),
@@ -168,10 +221,13 @@ def detect(D):
             # trade
             prev = rd[(rd['tick'] < t) & (rd['tick'] >= t - 5 * TICK) & (rd['attacker_steamid'] == k.user_steamid) & (rd['user_team_num'] == team)]
             if len(prev):
-                card(t, 'trade_kill', pos, k.user_name, vpos, base_facts + f" They had killed {prev.iloc[-1]['user_name']} {rt(t, rn) - rt(int(prev.iloc[-1]['tick']), rn):.1f} s earlier.", place=k.attacker_last_place_name, victim_sid=k.user_steamid, headshot=bool(k.headshot))
+                pv = prev.iloc[-1]
+                att, atxt = attention(k.user_steamid, me, int(pv['tick']), t, str(k.user_name), 'you', str(pv['user_name']))
+                card(t, 'trade_kill', pos, k.user_name, vpos, base_facts + f" They had killed {pv['user_name']} {rt(t, rn) - rt(int(pv['tick']), rn):.1f} s earlier. {atxt}".rstrip() + "", place=k.attacker_last_place_name, victim_sid=k.user_steamid, headshot=bool(k.headshot), extra_pos=(pv['user_X'], pv['user_Y']), extra_label=f"{pv['user_name']} died", **att)
             # retake
             if side == 'CT' and plant_t and t > plant_t and won:
-                card(t, 'retake_kill', pos, k.user_name, vpos, base_facts + f" Bomb had been planted {rt(t, rn) - rt(plant_t, rn):.0f} s earlier; the round was won.", place=k.attacker_last_place_name, victim_sid=k.user_steamid, headshot=bool(k.headshot))
+                pr = plant[plant['total_rounds_played'] == rn].iloc[0]
+                card(t, 'retake_kill', pos, k.user_name, vpos, base_facts + f" Bomb had been planted {rt(t, rn) - rt(plant_t, rn):.0f} s earlier; the round was won.", place=k.attacker_last_place_name, victim_sid=k.user_steamid, headshot=bool(k.headshot), extra_pos=(pr['user_X'], pr['user_Y']), extra_label='bomb')
             # reposition
             if i > 0:
                 pk = rk.iloc[i - 1]
@@ -183,7 +239,7 @@ def detect(D):
             k = rk.iloc[-1]; t = int(k['tick'])
             card(t, 'multi_kill', (k['attacker_X'], k['attacker_Y']), k['user_name'], (k['user_X'], k['user_Y']),
                  f"Round {rn+1}, {side}. {len(rk)} kills: " + '; '.join(f"{r.user_name} at {rt(int(r.tick), rn)} s from {r.attacker_last_place_name}" for r in rk.itertuples()) + f". {dmg} damage this round." + (" You survived." if not died else ""),
-                 place=k['attacker_last_place_name'], victim_sid=k['user_steamid'], kills=len(rk))
+                 place=k['attacker_last_place_name'], victim_sid=k['user_steamid'], kills=len(rk), opponents=[(str(r.user_name), (r.user_X, r.user_Y)) for r in rk.itertuples()])
         # flash assists (teammate kill on an enemy I blinded)
         for k in rd[(rd['attacker_team_num'] == team) & (rd['attacker_steamid'] != me)].itertuples():
             t = int(k.tick)
@@ -191,7 +247,7 @@ def detect(D):
             if len(b) and k.user_flash_duration and k.user_flash_duration > 0:
                 mp = mine[mine.index <= t]
                 mp = (mp.iloc[-1].X, mp.iloc[-1].Y) if len(mp) else (k.attacker_X, k.attacker_Y)
-                card(t, 'flash_assist', mp, k.user_name, (k.user_X, k.user_Y), f"Round {rn+1}, {side}, {rt(t, rn)} s. Your flash blinded {k.user_name} for {float(b.iloc[-1]['blind_duration']):.1f} s and {k.attacker_name} killed them at {k.user_last_place_name} while blind.", place=None, victim_sid=k.user_steamid)
+                card(t, 'flash_assist', mp, k.user_name, (k.user_X, k.user_Y), f"Round {rn+1}, {side}, {rt(t, rn)} s. Your flash blinded {k.user_name} for {float(b.iloc[-1]['blind_duration']):.1f} s and {k.attacker_name} killed them at {k.user_last_place_name} while blind.", place=None, victim_sid=k.user_steamid, extra_pos=(k.attacker_X, k.attacker_Y), extra_label=f"{k.attacker_name} killed")
         # clutch
         team_deaths = rd[rd['user_team_num'] == team]
         if won and not died and len(team_deaths) >= 4:
@@ -200,7 +256,8 @@ def detect(D):
             if fo and fo >= 1:
                 kills_after = int((rk['tick'] > t4).sum())
                 last = mine[(mine.index >= t4) & (mine.index <= end_of(rn))]; lp = (last.iloc[-1].X, last.iloc[-1].Y) if len(last) else mp
-                card(int(last.index[-1]) if len(last) else t4, 'clutch', lp, None, None, f"Round {rn+1}, {side}. Last alive from {rt(t4, rn)} s against {fo}. {kills_after} kills after that, {dmg} damage in the round, and the round was won.", place=None, vs=fo, kills=kills_after)
+                gg = by_tick.get(coarse(t4 + 8)); foes_pos = [(str(x.name), (x.X, x.Y)) for x in gg[(gg['team_num'] != team) & (gg['is_alive'] == True)].itertuples()] if gg is not None else []
+                card(int(last.index[-1]) if len(last) else t4, 'clutch', lp, None, None, f"Round {rn+1}, {side}. Last alive from {rt(t4, rn)} s against {fo}. {kills_after} kills after that, {dmg} damage in the round, and the round was won.", place=None, vs=fo, kills=kills_after, opponents=foes_pos)
         # utility damage
         hu = hurt[(hurt['total_rounds_played'] == rn) & (hurt['attacker_steamid'] == me) & (hurt['user_steamid'].isin(enemies)) & (hurt['weapon'].isin(['hegrenade', 'inferno', 'molotov', 'incgrenade']))]
         if len(hu):
@@ -208,16 +265,77 @@ def detect(D):
             if ud >= 30:
                 t = int(hu['tick'].min()); mp_ = mine[mine.index <= t]; mp_ = (mp_.iloc[-1].X, mp_.iloc[-1].Y) if len(mp_) else None
                 if mp_: card(t, 'util_damage', mp_, None, None, f"Round {rn+1}, {side}. {ud} damage from grenades to {hu['user_name'].nunique()} enemies: " + ', '.join(f"{n} {int(v)}" for n, v in hu.groupby('user_name')['dmg_health'].sum().items()) + '.', place=None, dmg=ud)
-        # utility on a signal (won rounds)
-        if won:
-            for r in D['nades'][(D['nades']['total_rounds_played'] == rn) & (D['nades']['weapon'].str.contains('smoke|molotov|incgrenade', na=False))].itertuples():
-                gg = by_tick.get(int(r.tick))
+        # utility on a signal: thrown on information, and it did something measurable
+        from mistake_report import nade_flight, NADE_RADIUS
+        fxt = D['fx']; gun_rn = D['gunfire'][D['gunfire']['total_rounds_played'] == rn]
+        for r in D['nades'][(D['nades']['total_rounds_played'] == rn) & (D['nades']['weapon'].str.contains('smoke|molotov|incgrenade|flashbang|hegrenade', na=False))].itertuples():
+            t0 = int(r.tick)
+            if death_tick is not None and t0 > death_tick: continue
+            w = r.weapon.replace('weapon_', ''); fl = nade_flight(D, me, t0, w)
+            if fl is None: continue
+            kind, _path, land, _thr, det = fl
+            mypos = (r.user_X, r.user_Y)
+            # signal in the 3 s before the throw
+            sig = {}   # one signal per enemy: the first seen
+            for ct in range(coarse(t0 - 3 * TICK) or t0, t0 + 1, 8):
+                gg = by_tick.get(ct)
                 if gg is None: continue
-                foes = gg[(gg['team_num'] != team) & (gg['is_alive'] == True)]
-                near = sum(1 for f in foes.itertuples() if math.dist((r.user_X, r.user_Y), (f.X, f.Y)) * M < 30)
-                if near >= 2 and (death_tick is None or r.tick < death_tick):
-                    card(int(r.tick), 'util_on_signal', (r.user_X, r.user_Y), None, None, f"Round {rn+1}, {side}, {rt(int(r.tick), rn)} s. {r.weapon.replace('weapon_', '')} from {r.user_last_place_name} with {near} enemies within 30 m. Round won.", place=r.user_last_place_name)
-                    break
+                for f in gg[(gg['team_num'] != team) & (gg['is_alive'] == True)].itertuples():
+                    dl = math.dist((f.X, f.Y), land) * M; dm = math.dist((f.X, f.Y), mypos) * M
+                    if bool(f.spotted) and dl < 40: sig.setdefault(str(f.name), f"{f.name} spotted by your team {dl:.0f} m from where it landed")
+                    elif dm < 15: sig.setdefault(str(f.name), f"{f.name} within {dm:.0f} m of you")
+            for g_ in gun_rn[(gun_rn['tick'] >= t0 - 3 * TICK) & (gun_rn['tick'] <= t0)].itertuples():
+                if str(g_.user_steamid) in enemies:
+                    dg = math.dist((g_.user_X, g_.user_Y), mypos) * M
+                    if dg < 30: sig.setdefault(str(g_.user_name), f"{g_.user_name} firing {dg:.0f} m from you")
+            if not sig: continue
+            sig = list(sig.values())[:3]
+            # effect
+            eff = []; n_bl = 0; killed_blind = False; dmg = 0; held = []; crossed = []; mates_bl = 0
+            fxrow = fxt[(fxt['kind'] == kind) & ((fxt['tick'] - det).abs() <= 2)]
+            end = int(fxrow.iloc[0]['end']) if len(fxrow) else det + 7 * TICK
+            if kind == 'flashbang':
+                b = blind[(blind['attacker_steamid'] == me) & ((blind['tick'] - det).abs() <= 2)]
+                for x in b.itertuples():
+                    dur = float(x.blind_duration)
+                    if str(x.user_steamid) in enemies:
+                        if dur >= 1.0:
+                            n_bl += 1; eff.append(f"blinded {x.user_name} for {dur:.1f} s")
+                            kd = rd[(rd['user_steamid'] == x.user_steamid) & (rd['tick'] >= det) & (rd['tick'] <= det + dur * TICK) & (rd['attacker_team_num'] == team)]
+                            if len(kd): killed_blind = True; eff.append(f"{x.user_name} was killed while blind")
+                    elif str(x.user_steamid) != me and dur >= 1.0:
+                        mates_bl += 1; eff.append(f"but blinded teammate {x.user_name} for {dur:.1f} s")
+            else:
+                wname = {'hegrenade': 'hegrenade', 'molotov': 'inferno'}.get(kind)
+                if wname:
+                    hh = hurt[(hurt['total_rounds_played'] == rn) & (hurt['attacker_steamid'] == me) & (hurt['weapon'] == wname) & (hurt['tick'] >= det - 2) & (hurt['tick'] <= end + 2) & (hurt['user_steamid'].isin(enemies))]
+                    dmg = int(hh['dmg_health'].clip(upper=100).sum())
+                    if dmg: eff.append(f"{dmg} damage to {', '.join(sorted(set(hh['user_name'])))}")
+                if kind in ('smokegrenade', 'molotov'):
+                    R = NADE_RADIUS[kind] * M + 0.6
+                    before = by_tick.get(coarse(det - 3 * TICK)); at = by_tick.get(coarse(det))
+                    if before is not None and at is not None:
+                        for f in at[(at['team_num'] != team) & (at['is_alive'] == True)].itertuples():
+                            d_at = math.dist((f.X, f.Y), land) * M
+                            fb = before[before['steamid'] == f.steamid]
+                            d_before = math.dist((fb.iloc[0].X, fb.iloc[0].Y), land) * M if len(fb) else d_at
+                            if d_at > 20 or d_before - d_at < 2: continue        # not approaching it
+                            inside = False
+                            for ct in range(coarse(det), end + 1, 16):
+                                gg = by_tick.get(ct)
+                                if gg is None: continue
+                                fr = gg[gg['steamid'] == f.steamid]
+                                if not len(fr) or not bool(fr.iloc[0]['is_alive']): break
+                                if math.dist((fr.iloc[0].X, fr.iloc[0].Y), land) * M < R: inside = True; break
+                            (crossed if inside else held).append(str(f.name))
+                    if held: eff.append(f"held {', '.join(held)} ({'was' if len(held) == 1 else 'were'} approaching it and never came through while it was up)")
+                    if crossed: eff.append(f"{', '.join(crossed)} pushed through it anyway")
+            effective = n_bl > 0 or dmg > 0 or len(held) > 0
+            if not effective: continue
+            lname = {'smokegrenade': 'Smoke', 'flashbang': 'Flash', 'hegrenade': 'HE', 'molotov': 'Molotov'}[kind]
+            card(t0, 'util_on_signal', mypos, None, None,
+                 f"Round {rn+1}, {side}, {rt(t0, rn)} s. {lname} from {r.user_last_place_name}, landed {math.dist(mypos, land) * M:.0f} m away. Signal: {'; '.join(sig)}. Effect: {'; '.join(eff)}.",
+                 place=r.user_last_place_name, nade=kind, signal=sig, n_blinded=n_bl, killed_blind=killed_blind, dmg=dmg, n_held=len(held), n_crossed=len(crossed), n_mates_blinded=mates_bl, extra_pos=land, extra_label=f"{lname.lower()} landed")
         # survived with damage / saved rifle
         endpos = mine[(mine.index >= ft) & (mine.index <= end_of(rn))]
         if len(endpos):
@@ -231,7 +349,9 @@ def detect(D):
             t = int(d.tick); pos = (d.user_X, d.user_Y)
             later = rd[(rd['tick'] > t) & (rd['tick'] <= t + 5 * TICK) & (rd['user_steamid'] == d.attacker_steamid) & (rd['attacker_team_num'] == team)]
             if len(later):
-                card(t, 'died_tradeable', pos, d.attacker_name, (d.attacker_X, d.attacker_Y), f"Round {rn+1}, {side}, {rt(t, rn)} s. Died at {d.user_last_place_name} to {d.attacker_name}; {later.iloc[0]['attacker_name']} killed them {rt(int(later.iloc[0]['tick']), rn) - rt(t, rn):.1f} s later.", place=d.user_last_place_name, victim_sid=d.attacker_steamid, z=float(d.user_Z))
+                lt = later.iloc[0]
+                att, atxt = attention(d.attacker_steamid, lt['attacker_steamid'], t, int(lt['tick']), str(d.attacker_name), str(lt['attacker_name']), 'you')
+                card(t, 'died_tradeable', pos, d.attacker_name, (d.attacker_X, d.attacker_Y), f"Round {rn+1}, {side}, {rt(t, rn)} s. Died at {d.user_last_place_name} to {d.attacker_name}; {lt['attacker_name']} killed them {rt(int(lt['tick']), rn) - rt(t, rn):.1f} s later. {atxt}".strip(), place=d.user_last_place_name, victim_sid=d.attacker_steamid, z=float(d.user_Z), extra_pos=(lt['attacker_X'], lt['attacker_Y']), extra_label=f"{lt['attacker_name']} traded", **att)
             if side == 'CT':
                 ma, fo, md, mp = state(t - 1, team)
                 if ma is not None and ma >= 2 and md and md[0][0] > 15:
@@ -258,6 +378,7 @@ def detect(D):
         g0 = by_tick2.get(ft)
         if g0 is None or not (g0['steamid'] == me).any(): continue
         team = int(g0[g0['steamid'] == me].iloc[0]['team_num']); side = 'CT' if team == 3 else 'T'
+        if team not in (2, 3): continue
         won = D['winner'].get(rn) == side
         rd = deaths[deaths['total_rounds_played'] == rn]
         # fights where the teammate died (helper) plus fights the teammate won: approximate the latter from hurt pairs
@@ -273,8 +394,13 @@ def detect(D):
             card(t, 'fight_support', f['my_pos'], f['enemy'], f['e_pos'],
                  f"Round {rn+1}, {side}, {rt(t, rn)} s. {f['mate']} fought {f['enemy']} for {f['dur']:.1f} s; you did {f['dmg_before']} damage to {f['enemy']} during the fight from {f['min_dist']:.0f} m at {f['my_place']}." + (f" {f['enemy']} died." if e_died else '') + (f" {f['mate']} still died." if True else ''),
                  place=f['my_place'], victim_sid=f['enemy_sid'], dmg=f['dmg_before'], enemy_died=e_died, mate_survived=False, extra_pos=f['mate_pos'], extra_label=f"{f['mate']} died")
-    import positioning
+    import positioning, flags_extra
     out.extend(positioning.positives(D, me))
+    out.extend(flags_extra.positives(D, me))
+    KEEP_NEAR = {'fight_support', 'good_anchor', 'died_tradeable'}
+    for m in out:
+        if m['kind'] not in KEEP_NEAR: m['near'] = None
+        if m['kind'] == 'died_tradeable': m['near'] = None   # the trader is shown as its own marker
     return out
 
 
