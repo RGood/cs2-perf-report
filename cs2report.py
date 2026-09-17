@@ -268,7 +268,26 @@ def map_of_demo(path):
     return DemoParser(path).parse_header().get('map_name', 'unknown')
 
 
-def run_with_progress(cmd, on_progress=None, on_line=None):
+CRASH_CODES = {139, -11, 3221225477, -1073741819, 3221226505, -1073741571}   # segfault / access violation / fail-fast
+
+
+class ReportCrashed(Exception):
+    def __init__(self, code): super().__init__(str(code)); self.code = code
+
+
+def run_with_progress(cmd, on_progress=None, on_line=None, attempts=3):
+    """Run the report script; if the process dies in a native crash (demoparser2 has a thread race on some demos) run it again."""
+    for i in range(attempts):
+        try:
+            return _run_with_progress(cmd, on_progress, on_line)
+        except ReportCrashed as e:
+            if i + 1 >= attempts: raise RuntimeError(f"the demo parser crashed {attempts} times in a row (exit code {e.code}); try once more, and if it keeps failing the demo may be damaged")
+            msg = f"the demo parser crashed (exit code {e.code}); running the report again ({i + 2} of {attempts})"
+            print(msg, file=sys.stderr, flush=True)
+            if on_line: on_line(msg)
+
+
+def _run_with_progress(cmd, on_progress=None, on_line=None):
     """Run the report script, forwarding PROGRESS lines to a callback (or drawing a text bar) and other lines to on_line/print."""
     # pythonw has no valid C-level stdout/stderr; a C library writing a warning to them fail-fasts the process (0xc0000409).
     # The report and its worker processes therefore always run under python.exe, hidden by CREATE_NO_WINDOW.
@@ -314,6 +333,7 @@ def run_with_progress(cmd, on_progress=None, on_line=None):
             if on_line: on_line(line)
             elif not on_progress: print(line)
     p.wait(); stop.set()
+    if p.returncode in CRASH_CODES or (p.returncode or 0) < 0: raise ReportCrashed(p.returncode)
     if p.returncode != 0:
         raise RuntimeError('\n'.join(tail[-12:]) or 'report script failed')
     return tail

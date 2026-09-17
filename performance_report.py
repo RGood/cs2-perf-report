@@ -657,13 +657,20 @@ def build(D, out_path, demo_name, focus=None):
         for var in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'): os.environ.setdefault(var, '1')
         try:
             with open(pk, 'wb') as f: pickle.dump(D, f, protocol=pickle.HIGHEST_PROTOCOL)
-            with CF.ProcessPoolExecutor(max_workers=workers, initializer=_worker_init, initargs=(pk,)) as ex:
-                futs = {ex.submit(_analyse, tn, sid, name): (tn, sid, name) for tn, sid, name in players}
-                for fut in CF.as_completed(futs):
-                    sid, body, st = fut.result(); bodies[sid] = body; stats[sid] = st; done += 1
-                    progress(34 + 60 * done / total_players, f"analysed {st['name']} ({done} of {total_players})")
-        except CF.process.BrokenProcessPool as e:
-            print(f"worker pool broke ({e}); finishing the remaining players in this process", file=sys.stderr)
+            for attempt in (1, 2):      # a worker can die in a native parser crash; a second pool usually completes the rest
+                todo = [(tn, sid, name) for tn, sid, name in players if sid not in bodies]
+                if not todo: break
+                try:
+                    with CF.ProcessPoolExecutor(max_workers=min(workers, len(todo)), initializer=_worker_init, initargs=(pk,)) as ex:
+                        futs = {ex.submit(_analyse, tn, sid, name): (tn, sid, name) for tn, sid, name in todo}
+                        for fut in CF.as_completed(futs):
+                            sid, body, st = fut.result(); bodies[sid] = body; stats[sid] = st; done += 1
+                            progress(34 + 60 * done / total_players, f"analysed {st['name']} ({done} of {total_players})")
+                except CF.process.BrokenProcessPool as e:
+                    print(f"worker pool broke ({e}); " + ("starting a new pool for the remaining players" if attempt == 1 else "finishing the remaining players in this process"), file=sys.stderr)
+                    progress(34 + 60 * done / total_players, f"a worker crashed; {'retrying the rest' if attempt == 1 else 'finishing in one process'}")
+        except Exception as e:
+            print(f"worker pool failed ({e}); finishing the remaining players in this process", file=sys.stderr)
         finally:
             try: os.remove(pk)
             except OSError: pass

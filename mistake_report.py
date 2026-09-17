@@ -64,7 +64,7 @@ RULES = {
         "A teammate was trading damage with an enemy for 1.5 s or more while you were free: alive, not fighting anyone, not flashed, and not being watched by another enemy. You knew where the fight was and could have established a sightline: you had the enemy in view during or shortly before it, they had you in view, the teammate beside you had them in view, or you could hear the shots from within 40 m. You could have reached it while it was still going (path distance at run speed plus reaction time, within the fight's length) and no other enemy was covering it. You did nothing for the whole fight. Distance alone never triggers this.",
         "When a teammate's fight starts within reach, move to it or swing it. Two guns on one enemy is the cheapest advantage in the game, and standing still while it happens is a free round for the other team."),
     'team_flash': ("Flashed a teammate",
-        "Your flashbang blinded a teammate for a second or more. A blind teammate cannot hold their angle, trade, or see the push, and the blind lasts longer than the pop suggests.",
+        "Your flashbang blinded a teammate for a second or more. A blind teammate cannot hold their angle, trade, or see the push, and the blind lasts longer than the pop suggests. It counts far more when an enemy killed them while they were still blind.",
         "Call the flash, throw it from behind the teammate's line or higher, and keep them out of the pop: a flash that pops behind cover for your side and in the open for theirs."),
     'team_flash_death': ("Teammate died blind from your flash",
         "Your flashbang blinded a teammate and an enemy killed them while they were still blind. That is a kill you handed over.",
@@ -83,7 +83,20 @@ RULES = {
 }
 
 # ----------------------------------------------------------------------------- parsing
-def parse(path, me):
+def parse(path, me, attempts=3):
+    """demoparser2 occasionally fails at random on some demos (a race in its threads: a spurious EntityNotFound, or a crash of
+    the whole process). A Python-level failure is retried here; a crash is retried by the process runner in cs2report."""
+    last = None
+    for i in range(attempts):
+        try: return _parse(path, me)
+        except Exception as e:
+            last = e
+            if 'demoparser' not in (type(e).__module__ or '').lower() and 'DemoParser' not in type(e).__qualname__ and 'DemoParser' not in str(e): raise
+            print(f"demo parser failed ({e}); retrying ({i + 2} of {attempts})", file=sys.stderr, flush=True)
+    raise last
+
+
+def _parse(path, me):
     p = DemoParser(path)
     mapname = p.parse_header().get('map_name', '?')
     PROGRESS(4, 'reading events')
@@ -706,6 +719,7 @@ def detect(D):
     import positioning, flags_extra
     out.extend(positioning.negatives(D, me))
     out.extend(flags_extra.negatives(D, me))
+    out = [o for o in out if o['kind'] not in flags_extra.RETIRED]
     KEEP_NEAR = {'separated_from_team', 'held_alone', 'early_solo_contact', 'eco_wander', 'late_support', 'sat_out'}
     for m_ in out:
         if m_['kind'] not in KEEP_NEAR: m_['near'] = None
@@ -773,7 +787,7 @@ def detect(D):
         if len(foes): facts += f" It also blinded {', '.join(f'{x.user_name} ({float(x.blind_duration):.1f} s)' for x in foes.itertuples())}."
         else: facts += " It blinded no enemy for a second or more."
         out.append(dict(round=rn + 1, side=side, time=rt(t, rn), z=None, place=my_place, pos=my_pos, killer=None, kpos=None, kplace=None, weapon=None, my_weapon=None, dist=0, near=None,
-                        path=[], mates_alive=None, nades_thrown=thrown, won=D['winner'].get(rn) == side, kind='team_flash_death' if died else 'team_flash', facts=facts,
+                        path=[], mates_alive=None, nades_thrown=thrown, won=D['winner'].get(rn) == side, kind='team_flash', facts=facts, mate_died_blind=bool(died),
                         n_mates=len(mates), max_dur=max_dur, n_foes=len(foes), blind_left=(max(0, died[0]['left']) if died else 0),
                         extra_pos=extra[0] if extra else None, extra_label=extra[1] if extra else None))
     # HE or molotov damage to teammates, one flag per grenade type per round
@@ -812,6 +826,10 @@ BASE_SEVERITY = {
     **__import__('flags_extra').BASE_NEG,
 }
 
+for _k in __import__('flags_extra').RETIRED:
+    RULES.pop(_k, None); BASE_SEVERITY.pop(_k, None)
+
+
 def severity(m):
     """0-100. Base weight for the mistake type, then context modifiers. Returns (score, breakdown list)."""
     k = m['kind']; score = BASE_SEVERITY.get(k, 40); br = [f"base {score} for this mistake type"]
@@ -844,7 +862,9 @@ def severity(m):
         add(4 * max(0, (m.get('n_mates') or 1) - 1), f"{m.get('n_mates')} teammates blinded")
         add(min(8, int((m.get('max_dur') or 0) * 2)), f"blinded for up to {m.get('max_dur', 0):.1f} s")
         add(-4 if (m.get('n_foes') or 0) else 0, f"it also blinded {m.get('n_foes')} {'enemy' if m.get('n_foes') == 1 else 'enemies'}")
-        if k == 'team_flash_death': add(6 if (m.get('blind_left') or 0) >= 1.0 else 0, f"they still had {m.get('blind_left', 0):.1f} s of blind left when they died")
+        if m.get('mate_died_blind'):
+            add(26, 'a teammate died while still blind from it')
+            add(6 if (m.get('blind_left') or 0) >= 1.0 else 0, f"they still had {m.get('blind_left', 0):.1f} s of blind left when they died")
     if k == 'team_util_damage':
         add(min(15, int((m.get('dmg') or 0) // 5)), f"{m.get('dmg')} damage to teammates")
         add(20 if m.get('mate_died') else 0, 'a teammate died from it')

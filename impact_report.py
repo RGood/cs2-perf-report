@@ -63,6 +63,10 @@ BASE_IMPACT = {'clutch': 60, 'opening_kill': 50, 'retake_kill': 50, 'multi_kill'
                'reposition_kill': 20, 'fight_support': 35, 'flash_assist': 32, **__import__('positioning').BASE_POS, **__import__('flags_extra').BASE_POS, 'util_damage': 30, 'survived_damage': 25, 'util_on_signal': 20, 'saved_rifle': 25, 'died_tradeable': 25}
 
 
+for _k in __import__('flags_extra').RETIRED:
+    RULES.pop(_k, None); BASE_IMPACT.pop(_k, None)
+
+
 def impact(m):
     k = m['kind']; score = BASE_IMPACT.get(k, 35); br = [f"base {score} for this play type"]
     def add(v, why):
@@ -93,6 +97,9 @@ def impact(m):
         add(-4 * (m.get('n_crossed') or 0), f"{m.get('n_crossed')} enemies pushed through it anyway")
     if k == 'survived_damage': add(min(10, int((m.get('dmg') or 0) // 40)), f"{m.get('dmg')} damage")
     if k == 'flash_kill': add(min(6, int(m.get('kills', 1) - 1) * 6), 'more than one blind kill')
+    if k in ('watched_bomb', 'held_plant_spot', 'swung_own_flash', 'flash_in_fight', 'attacked_off_view', 'fought_with_cover', 'pistol_switch') and m.get('got_kill'): add(8, 'and the kill followed')
+    if k == 'committed_defuse' and m.get('finished'): add(10, 'the defuse finished')
+    if k == 'defuse_fake' and m.get('punished'): add(10, 'an enemy died peeking it')
     if k == 'held_angle' and m.get('headshot'): add(3, 'headshot')
     if k == 'rotated_on_info': add(min(10, int((m.get('dmg') or 0) // 25)), f"{m.get('dmg')} damage after arriving")
     if k == 'fight_support':
@@ -187,7 +194,7 @@ def detect(D):
         rk = rd[rd['attacker_steamid'] == me]; rdm = rd[rd['user_steamid'] == me]
         died = len(rdm) > 0; death_tick = int(rdm.iloc[0]['tick']) if died else None
         h = hurt[(hurt['total_rounds_played'] == rn) & (hurt['attacker_steamid'] == me)]
-        enemies = set(g[g['team_num'] != team]['steamid'])
+        enemies = set(g[g['team_num'] != team]['steamid']); mates = set(str(x) for x in g[(g['team_num'] == team) & (g['steamid'] != me)]['steamid'])
         h = h[h['user_steamid'].isin(enemies)]
         dmg = int(h['dmg_health'].clip(upper=100).sum())
         equip = int(me0['current_equip_value'])
@@ -248,6 +255,29 @@ def detect(D):
                 mp = mine[mine.index <= t]
                 mp = (mp.iloc[-1].X, mp.iloc[-1].Y) if len(mp) else (k.attacker_X, k.attacker_Y)
                 card(t, 'flash_assist', mp, k.user_name, (k.user_X, k.user_Y), f"Round {rn+1}, {side}, {rt(t, rn)} s. Your flash blinded {k.user_name} for {float(b.iloc[-1]['blind_duration']):.1f} s and {k.attacker_name} killed them at {k.user_last_place_name} while blind.", place=None, victim_sid=k.user_steamid, extra_pos=(k.attacker_X, k.attacker_Y), extra_label=f"{k.attacker_name} killed")
+        # own flashes: did anyone act on them while the enemy was blind? (kill not required)
+        myb = blind[(blind['total_rounds_played'] == rn) & (blind['attacker_steamid'] == me) & (blind['user_team_num'] != team) & (blind['blind_duration'] >= 1.0)]
+        for tick_, grp in myb.groupby('tick'):
+            t = int(tick_); swung = None; fought = None
+            for x in grp.itertuples():
+                e = str(x.user_steamid); dur = float(x.blind_duration); t_end = t + int(dur * TICK)
+                for ct in range(coarse(t) or t, t_end + 1, 8):
+                    g = by_tick.get(ct)
+                    if g is None: continue
+                    mr = g[g['steamid'] == me]
+                    if len(mr) and bool(mr.iloc[0]['is_alive']):
+                        try: seen_by = set(str(v) for v in mr.iloc[0]['approximate_spotted_by'])
+                        except TypeError: seen_by = set()
+                        if e in seen_by and swung is None: swung = (x, ct, (float(mr.iloc[0].X), float(mr.iloc[0].Y)))
+                hm = hurt[(hurt['total_rounds_played'] == rn) & (hurt['user_steamid'] == e) & (hurt['tick'] >= t) & (hurt['tick'] <= t_end) & (hurt['attacker_steamid'] != me) & (hurt['attacker_steamid'].isin(mates))]
+                if len(hm) and fought is None: fought = (x, hm.iloc[0])
+            if swung:
+                x, ct, mp = swung; kd = rd[(rd['user_steamid'] == str(x.user_steamid)) & (rd['attacker_steamid'] == me) & (rd['tick'] >= t) & (rd['tick'] <= t + int(float(x.blind_duration) * TICK))]
+                card(ct, 'swung_own_flash', mp, x.user_name, None, f"Round {rn+1}, {side}, {rt(ct, rn)} s. Your flash blinded {x.user_name} for {float(x.blind_duration):.1f} s and you came into their view {(ct - t) / TICK:.1f} s into it." + (" You killed them." if len(kd) else ""), place=None, got_kill=bool(len(kd)))
+            if fought:
+                x, h0 = fought; kd = rd[(rd['user_steamid'] == str(x.user_steamid)) & (rd['attacker_team_num'] == team) & (rd['tick'] >= t) & (rd['tick'] <= t + int(float(x.blind_duration) * TICK))]
+                mp = mine[mine.index <= t]; mp = (mp.iloc[-1].X, mp.iloc[-1].Y) if len(mp) else None
+                if mp is not None: card(t, 'flash_in_fight', mp, x.user_name, None, f"Round {rn+1}, {side}, {rt(t, rn)} s. Your flash blinded {x.user_name} for {float(x.blind_duration):.1f} s and {h0['attacker_name']} hit them {(int(h0['tick']) - t) / TICK:.1f} s into it." + (f" {kd.iloc[0]['attacker_name']} killed them." if len(kd) else ""), place=None, got_kill=bool(len(kd)))
         # clutch
         team_deaths = rd[rd['user_team_num'] == team]
         if won and not died and len(team_deaths) >= 4:
@@ -397,6 +427,7 @@ def detect(D):
     import positioning, flags_extra
     out.extend(positioning.positives(D, me))
     out.extend(flags_extra.positives(D, me))
+    out = [o for o in out if o['kind'] not in flags_extra.RETIRED]
     KEEP_NEAR = {'fight_support', 'good_anchor', 'died_tradeable'}
     for m in out:
         if m['kind'] not in KEEP_NEAR: m['near'] = None
