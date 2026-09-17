@@ -28,7 +28,7 @@ RULES = {
         "Only counted when three things were true after contact: there was time (2 s for a flash or HE with the killer inside 30 m, 4 s for a smoke or molotov), there was a safe throw window of at least 1.5 s in which no nearby enemy was visible to your team, you were not visible to theirs, and you were not being hit, and the grenade would have done something. If the enemy could engage you the whole time, throwing would have been the mistake, and the grenade is not counted.",
         "Once contact is called and you are delaying, the usable grenades go out in the first seconds, not after the fight is lost. Flash the choke, HE the stack, molotov the entrance, then fight."),
     'util_too_early': ("Utility thrown too early",
-        "A smoke or molotov thrown with no enemy within 30 m, none spotted by your team, and usually before the T side could even reach that choke. Later in the same round you were in contact for 4 s or more with no delay grenade left. The throw was on the clock, not on information.",
+        "A smoke or molotov thrown with no enemy within 30 m and none spotted by your team, that then did nothing: no teammate used the space it made (nobody of yours came within 8 m of it while it lasted), no enemy came within 12 m of it, and it was not a diversion (the round's first fight was not 40 m or more away from it with nobody of yours near it). Later in the same round you were in contact for 4 s or more with no delay grenade left. Set-piece smokes the team walks behind, fakes, and utility that met an enemy are not counted.",
         "Hold the delay grenade until one of these exists: enemies seen or heard at the choke, a teammate's call, or the enemy's timing from earlier rounds. Before the earliest possible T arrival at that choke, nothing you throw is reacting to anything."),
     'separated_from_team': ("Isolated before dying",
         "In the 10 s before this death you and your nearest teammate moved apart, with two or more teammates still alive. This is the avoidable kind of untraded death: the gap was created by movement, not by the round state.",
@@ -42,9 +42,9 @@ RULES = {
     'missed_at_range': ("Bursts missed at range",
         "You fired in bursts or taps, which is the right pattern, and still did 20 damage or less to anyone, with no kill, at enemies 20 m or more away. That is not spray control. It is the first bullets of each burst missing: crosshair placement before the peek, or the burst starting before the crosshair is on the target.",
         "Crosshair at head height on the exact corner before you swing it. Start the burst only when the crosshair is on the body, not while it is still moving. Yprac prefire and far-wall one-taps target this."),
-    'kill_then_die': ("Traded by enemy",
-        "After a kill everyone knows where you are, and the next enemy is already aiming at that spot. Re-peeking or staying is the deadliest 50-50 in the game.",
-        "After every kill, move at least one position before the next fight. Take the trade only if a teammate is already swinging with you."),
+    'kill_then_die': ("Traded after a kill",
+        "You died within 5 s of a kill, near where you got it. Being traded is often the enemy playing well, so this counts for little by itself. It counts more when you had the time to move off the kill spot and stayed on it, and less when the trader already had you in view as you took the kill, because then there was no reset to make.",
+        "After a kill, if a second or more passes without a second enemy on you, move a position before the next fight."),
     'early_solo_contact': ("Early solo T contact",
         "Contact before 20 s with nobody near you means the CT is set up and you are not. You had dealt no damage, so the round started a man down with no information. Not counted when a teammate died in the same fight just before you, or when a teammate had your killer in view.",
         "No contact in the first 20 s unless the team's utility has landed and a teammate is on your shoulder."),
@@ -141,11 +141,30 @@ def _parse(path, me):
     snap = p.parse_ticks(["X", "Y", "is_alive", "team_num", "last_place_name", "inventory", "current_equip_value", "spotted", "approximate_spotted_by", "flash_duration", "yaw"], ticks=sorted(set(coarse + death_ticks + nade_ticks + list(fz.values()))))
     # players not on a team at a sampled tick (connecting, spectating) have no team number; use 0 so int() never fails and no side matches
     snap['team_num'] = snap['team_num'].fillna(0)
+    # a dead player's spectator camera keeps "seeing": their id turns up in other players' approximate_spotted_by lists and their own
+    # spotted flag goes stale. Drop dead players from every spotted-by list and clear spotted on dead rows.
+    alive_sets = {int(t_): set(g_.loc[g_['is_alive'] == True, 'steamid'].astype(str)) for t_, g_ in snap.groupby('tick')}
+    ticks_ = snap['tick'].to_numpy(); lists_ = snap['approximate_spotted_by'].tolist(); cleaned = []
+    for t_, v_ in zip(ticks_, lists_):
+        try: cleaned.append([x for x in v_ if str(x) in alive_sets.get(int(t_), ())])
+        except TypeError: cleaned.append(v_)
+    snap['approximate_spotted_by'] = cleaned
+    snap.loc[snap['is_alive'] == False, 'spotted'] = False
+    # a dead player spectating a teammate still receives player_blind events (the camera they watch gets flashed): drop those
+    if len(blind):
+        c0 = int(coarse[0]) if len(coarse) else 0
+        alive_at = {(int(t_), str(s_)): bool(a_) for t_, s_, a_ in zip(snap['tick'], snap['steamid'].astype(str), snap['is_alive'])}
+        keep = []
+        for t_, s_ in zip(blind['tick'], blind['user_steamid'].astype(str)):
+            ct_ = int(t_) - ((int(t_) - c0) % 8)
+            keep.append(alive_at.get((ct_, s_), alive_at.get((int(t_), s_), True)))
+        blind = blind[keep].copy()
     for df_ in (deaths, hurt, blind):
         for c_ in [c for c in df_.columns if c.endswith('team_num')]: df_[c_] = df_[c_].fillna(0)
     PROGRESS(30, 'positions read')
     snap['steamid'] = snap['steamid'].astype(str)
     round_end = {int(r.total_rounds_played) - 1: int(r.tick) for r in rend.itertuples()}
+    round_reason = {int(r.total_rounds_played) - 1: str(r.reason) for r in rend.itertuples()}   # t_killed, ct_killed, bomb_exploded, bomb_defused, target_saved (time ran out) ...
     # grenade projectiles: position every 4 ticks for the whole flight (entity ids are reused, so flights are split by tick gaps later)
     PROGRESS(30, 'reading grenade flights')
     gr = p.parse_grenades()
@@ -202,7 +221,7 @@ def _parse(path, me):
     except Exception:
         xt = pd.DataFrame(columns=['tick', 'steamid', 'ducking', 'is_airborne', 'active_weapon_ammo', 'active_weapon_name', 'is_scoped', 'has_defuser', 'has_helmet', 'balance', 'cash_spent_this_round'])
     return dict(reloads=reloads, defuse_begin=defuse_begin, defused=defused, plant_begin=plant_begin, bomb_drop=bomb_drop, bomb_pick=bomb_pick, pickups=pickups, exploded=exploded, xt=xt,
-                map=mapname, fz=fz, winner=winner, round_end=round_end, deaths=deaths, hurt=hurt, gunfire=gunfire, nades=nades, all_nades=all_nades, blind=blind, plant=plant, snap=snap, me=me, proj=proj, deton=deton, fx=fx)
+                map=mapname, fz=fz, winner=winner, round_end=round_end, round_reason=round_reason, deaths=deaths, hurt=hurt, gunfire=gunfire, nades=nades, all_nades=all_nades, blind=blind, plant=plant, snap=snap, me=me, proj=proj, deton=deton, fx=fx)
 
 
 NADE_RADIUS = {'smokegrenade': 144, 'molotov': 150}   # world units: smoke cloud, molotov fire patch (for the landing marker only)
@@ -511,8 +530,36 @@ def detect(D):
             if g is not None:
                 foes = g[(g['team_num'] != team) & (g['is_alive'] == True)]
                 nr = sum(1 for f in foes.itertuples() if math.dist((r.user_X, r.user_Y), (f.X, f.Y)) * M < 30); sp = int(foes['spotted'].astype(bool).sum())
+            # what the grenade did after landing: did the team use the space it made, did it touch an enemy, or was it a diversion?
+            used = False; touched = False; fake = False; fake_d = None; land_ok = False
+            fl_ = nade_flight(D, me, int(r.tick), r.weapon) if 'smoke' in r.weapon or 'molotov' in r.weapon or 'inc' in r.weapon else None
+            if fl_:
+                kind_, _p_, land_, _thr_, det_ = fl_; land_ok = True
+                fxr_ = D['fx'][(D['fx']['kind'] == kind_) & ((D['fx']['tick'] - det_).abs() <= 2)]
+                end_ = int(fxr_.iloc[0]['end']) if len(fxr_) else det_ + (18 if kind_ == 'smokegrenade' else 7) * TICK
+                mate_near15 = False
+                for ct_ in range(det_ - ((det_ - int(min(by_tick))) % 8), end_ + 1, 16):
+                    g_ = by_tick.get(ct_)
+                    if g_ is None: continue
+                    for p_ in g_[(g_['is_alive'] == True)].itertuples():
+                        dd_ = math.dist((p_.X, p_.Y), land_) * M
+                        if int(p_['team_num'] if False else p_.team_num) == team:
+                            if dd_ <= 8: used = True
+                            if dd_ <= 15: mate_near15 = True
+                        elif dd_ <= 12: touched = True
+                    if used and touched: break
+                # a diversion: the team's first exchange of damage after the throw came well away from it, later, with nobody of ours near it
+                hx_ = D['hurt'][(D['hurt']['total_rounds_played'] == rn) & (D['hurt']['tick'] > int(r.tick)) & (D['hurt']['user_X'].notna())]
+                g0_ = by_tick.get(fz[rn]); my_ids_ = set(str(x) for x in g0_[g0_['team_num'] == team]['steamid']) if g0_ is not None else set()
+                foe_ids_ = set(str(x) for x in g0_[(g0_['team_num'] != team) & (g0_['team_num'] > 1)]['steamid']) if g0_ is not None else set()
+                for hh_ in hx_.itertuples():
+                    a_s = str(hh_.attacker_steamid); u_s = str(hh_.user_steamid)
+                    if (a_s in my_ids_ and u_s in foe_ids_) or (a_s in foe_ids_ and u_s in my_ids_):
+                        fake_d = math.dist((hh_.user_X, hh_.user_Y), land_) * M
+                        fake = fake_d >= 40 and (int(hh_.tick) - int(r.tick)) / TICK >= 5 and not mate_near15
+                        break
             throw_info.append(dict(t=rt(int(r.tick), rn), nade=r.weapon.replace('weapon_', ''), place=r.user_last_place_name, near=nr, spotted=sp,
-                                   blind=(nr == 0 and sp == 0), pre=(contact is None or r.tick < contact)))
+                                   blind=(nr == 0 and sp == 0), pre=(contact is None or r.tick < contact), used=used, touched=touched, fake=fake, fake_d=fake_d, land_ok=land_ok))
         equip = int(me_row['current_equip_value']) if me_row is not None else 0
         dist = float(d.distance) if pd.notna(d.distance) else 0
         # path: my positions in the last 12 s
@@ -543,17 +590,23 @@ def detect(D):
             out.append(dict(base, kind='util_unused', facts=facts + f" Contact began {after:.0f} s before you died with up to {foes_peak} attackers within 25 m. In that time you had a {safe_s:.1f} s window ending at {win_end} s where no nearby enemy was visible to your team, you were not visible to theirs, and you were not being hit. Usable and unthrown: {', '.join(usable)}." + (f" Not counted (no time or out of range): {', '.join(n for n in held if n not in usable)}." if len(held) > len(usable) else "")))
         elif held and tsec > 10 and contact is not None and after >= 2 and safe_s < SAFE_WINDOW:
             base['util_note'] = f"Held {', '.join(held)} at death, not counted: from contact at {rt(contact, rn)} s the enemy could engage you the whole time (longest safe window {safe_s:.1f} s), so throwing would have been the mistake."
-        early = [x for x in throw_info if x['blind'] and x['pre'] and x['nade'] in ('smokegrenade', 'molotov', 'incgrenade')]
+        early = [x for x in throw_info if x['blind'] and x['pre'] and x['nade'] in ('smokegrenade', 'molotov', 'incgrenade') and x['land_ok'] and not x['used'] and not x['touched'] and not x['fake']]
         if early and after >= 4 and not any(('Smoke' in n or 'Molotov' in n or 'Incendiary' in n) for n in held):
             e = early[0]
-            out.append(dict(base, kind='util_too_early', facts=facts + f" At {e['t']} s you threw a {e['nade']} from {e['place']} with no enemy within 30 m and none spotted by your team. Contact came at {rt(contact, rn)} s and lasted {after:.0f} s; you had no smoke or molotov left for it." + (f" Throws that did have a signal: " + '; '.join(f"{x['nade']} at {x['t']} s with {x['near']} enemies within 30 m" for x in throw_info if not x['blind']) + '.' if any(not x['blind'] for x in throw_info) else "")))
+            out.append(dict(base, kind='util_too_early', facts=facts + f" At {e['t']} s you threw a {e['nade']} from {e['place']} with no enemy within 30 m and none spotted by your team. Nobody on your team came within 8 m of where it landed while it lasted, no enemy came within 12 m of it, and the round's first fight was not a diversion away from it" + (f" ({e['fake_d']:.0f} m away)" if e.get('fake_d') is not None else "") + f". Contact came at {rt(contact, rn)} s and lasted {after:.0f} s; you had no smoke or molotov left for it." + (f" Throws that did have a signal: " + '; '.join(f"{x['nade']} at {x['t']} s with {x['near']} enemies within 30 m" for x in throw_info if not x['blind']) + '.' if any(not x['blind'] for x in throw_info) else "")))
         base['shared_fight'] = shared; base['mate_los'] = mate_los
         if len(mates) >= 2 and near and near[0] > 15 and not traded and not shared and not mate_los:
             sep = (moved10 is not None and moved10 > 12) or (mate10 is not None and mate10 < 15)
             gap = f" {len(mates)} teammates alive, nearest {near[0]:.0f} m away, nobody traded you."
             if sep:
                 ten = f" Ten seconds earlier you were {moved10:.0f} m from this spot" + (f" and the nearest teammate was {mate10:.0f} m away." if mate10 is not None else ".")
-                out.append(dict(base, kind='separated_from_team', facts=facts + gap + ten))
+                info_t = None
+                for ct_ in range(fz[rn], t, 32):
+                    g_ = by_tick.get(ct_)
+                    if g_ is not None and ((g_['team_num'] != team) & (g_['is_alive'] == True) & (g_['spotted'] == True)).any(): info_t = ct_; break
+                info_s = None if info_t is None else round((t - info_t) / TICK, 1)
+                note = (" Your team had not spotted an enemy before this." if info_t is None else f" Your team first spotted an enemy {info_s} s before you died.")
+                out.append(dict(base, kind='separated_from_team', facts=facts + gap + ten + note, info_s=info_s))
             else:
                 out.append(dict(base, kind='held_alone', facts=facts + gap + " You had been in this area for at least 10 s with no teammate within 15 m."))
         if shots4 >= 6 and dmg_any4 <= 20 and kills4 == 0 and aim_range >= 20:
@@ -563,7 +616,16 @@ def detect(D):
         if len(mk):
             k = mk.iloc[-1]
             if pd.notna(k['attacker_X']) and math.dist(pos, (k['attacker_X'], k['attacker_Y'])) * M < 8:
-                out.append(dict(base, kind='kill_then_die', facts=facts + f" You killed {k['user_name']} {round((t - k['tick']) / TICK, 1)} s earlier from within 8 m of where you died.", extra_pos=(k['user_X'], k['user_Y'])))
+                moved = math.dist(pos, (k['attacker_X'], k['attacker_Y'])) * M; gap_s = round((t - int(k['tick'])) / TICK, 1)
+                # was the trade already set up when you got the kill? (the trader had you in view at that moment)
+                gk = by_tick.get(int(k['tick'])) if int(k['tick']) in by_tick else by_tick.get(int(k['tick']) - ((int(k['tick']) - int(min(by_tick))) % 8))
+                trader_saw = False
+                if gk is not None:
+                    mr_ = gk[gk['steamid'] == me]
+                    if len(mr_):
+                        try: trader_saw = str(d.attacker_steamid) in [str(x) for x in mr_.iloc[0]['approximate_spotted_by']]
+                        except TypeError: trader_saw = False
+                out.append(dict(base, kind='kill_then_die', facts=facts + f" You killed {k['user_name']} {gap_s} s earlier and died {moved:.1f} m from that spot." + (f" {d.attacker_name} already had you in view when you got the kill." if trader_saw else ""), extra_pos=(k['user_X'], k['user_Y']), moved=moved, gap_s=gap_s, trader_saw=trader_saw))
         if side == 'T' and tsec < 20 and near and near[0] > 10 and dmg_round == 0 and not shared and not mate_los:
             out.append(dict(base, kind='early_solo_contact', facts=facts))
         if side == 'CT' and order == 1 and tsec < 30:
@@ -820,7 +882,7 @@ def detect(D):
 # ----------------------------------------------------------------------------- severity
 BASE_SEVERITY = {
     'zero_impact_full_buy': 50, 'lost_opener_ct': 50, 'separated_from_team': 45, 'early_solo_contact': 45,
-    'kill_then_die': 36, 'util_too_early': 36, 'util_unused': 34, 'spray_at_range': 30, 'died_blind': 28, 'util_on_timer': 30,
+    'kill_then_die': 14, 'util_too_early': 36, 'util_unused': 34, 'spray_at_range': 30, 'died_blind': 28, 'util_on_timer': 30,
     'missed_at_range': 26, 'held_alone': 28, 'eco_wander': 20, 'late_support': 40, 'sat_out': 32, 'team_flash': 22, 'team_flash_death': 48, 'team_util_damage': 20,
     **__import__('positioning').BASE_NEG,
     **__import__('flags_extra').BASE_NEG,
@@ -841,18 +903,22 @@ def severity(m):
     if m.get('won') is False: add(rm, 'round lost')
     elif m.get('won') is True: add(-rm, 'round won anyway')
     ma = m.get('mates_alive')
-    if ma is not None and k != 'util_on_timer':
+    if ma is not None and k not in ('util_on_timer', 'kill_then_die'):
         add({4: 10, 3: 7, 2: 3}.get(ma, 0), f'{ma} teammates still alive')
     if m.get('order') == 1: add(8, 'first death of the round')
     if m.get('dmg_round') == 0 and k not in ('util_on_timer', 'zero_impact_full_buy'): add(8, 'no damage dealt that round')
     eq = m.get('equip')
-    if eq is not None and k not in ('eco_wander', 'util_on_timer'):
+    if eq is not None and k not in ('eco_wander', 'util_on_timer', 'kill_then_die'):
         if eq >= 3700: add(6, 'full buy lost')
         elif eq < 1500: add(-8, 'eco round')
     if k == 'util_unused':
         add(min(8, 4 * (m.get('n_usable', 1) - 1)), 'more than one usable grenade held')
         add(4 if (m.get('after') or 0) >= 8 else 0, '8 s or more of contact to use it')
     if k == 'separated_from_team' and m.get('moved10'): add(min(8, int(m['moved10'] // 4)), f"moved {m['moved10']:.0f} m away in the last 10 s")
+    if k == 'separated_from_team' and m.get('side') == 'CT':
+        # a CT default is spread out by design; before the round gives information the spacing is the setup's, not the player's
+        if m.get('info_s') is None: add(-20, 'CT before any information: default spacing')
+        elif m['info_s'] < 8: add(-12, f"CT with only {m['info_s']} s of information")
     if k == 'util_on_timer': add(min(16, 4 * (m.get('repeats', 4) - 4)), f"repeated in {m.get('repeats')} rounds")
     if k in ('spray_at_range', 'missed_at_range', 'held_alone') and (m.get('foes_peak') or 0) >= 3: add(-5, 'outnumbered 3+ at the time')
     if k == 'crossfire': add(min(8, 4 * (m.get('n_seen', 2) - 2)), f"{m.get('n_seen')} enemies had you in view")
@@ -868,6 +934,14 @@ def severity(m):
     if k == 'team_util_damage':
         add(min(15, int((m.get('dmg') or 0) // 5)), f"{m.get('dmg')} damage to teammates")
         add(20 if m.get('mate_died') else 0, 'a teammate died from it')
+    if k == 'flash_reacted': add(min(8, int((m.get('air_s') or 0) * 3)), f"{m.get('air_s')} s in the air")
+    if k == 'alive_at_timeout':
+        add(10 if m.get('died_after') else 0, 'killed after the timer as well: the gun went too')
+        add(min(8, int((m.get('bonus') or 1400) // 500) - 2), f"a ${m.get('bonus')} loss bonus forfeited")
+    if k == 'kill_then_die':
+        if (m.get('gap_s') or 0) >= 1.5 and (m.get('moved') or 99) < 3: add(10, f"{m.get('gap_s')} s to move and you stayed within {m.get('moved'):.0f} m")
+        if (m.get('gap_s') or 0) >= 3 and (m.get('moved') or 99) < 3: add(6, 'three seconds or more on the same spot')
+        if m.get('trader_saw'): add(-6, 'the trader already had you in view at the kill')
     if k == 'sat_out':
         add(8 if m.get('mate_died') else 0, 'your teammate died in that fight')
         add(5 if (m.get('enemy_hp_after') or 0) >= 60 else 0, 'the enemy walked away barely hurt')

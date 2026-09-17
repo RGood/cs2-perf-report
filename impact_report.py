@@ -46,9 +46,12 @@ RULES = {
     'survived_damage': ("High damage, survived",
         "100 or more damage in a round you also survived. Damage without a death is the best possible round for the economy and the numbers.",
         "Keep taking fights from positions where losing the first exchange does not mean dying."),
-    'saved_rifle': ("Saved the rifle",
-        "Your team lost the round and you kept a rifle-value buy alive. Next round starts with a full kit instead of a force.",
-        "Keep recognising the lost round early. One saved rifle changes the next round's buy for the whole team."),
+    'clutch_exit_kills': ("Exit kills in a lost clutch",
+        "You were the last player alive, the round was lost, and you still took kills after your last teammate died. Kills at that point cost the enemy weapons and money for the next round.",
+        "Keep finding the fight you can win when the round is gone; each kill there is a saved weapon denied."),
+    'saved_rifle': ("Saved equipment",
+        "You survived a lost round and kept your equipment for the next one. Worth a little, more the more you kept. Not counted for a T who let the clock run out, which forfeits the loss bonus.",
+        "Keep making the save call early enough to actually get out with the gun."),
     'fight_support': ("Supported the fight",
         "A teammate was fighting an enemy and you put damage on that enemy before the fight was decided. Two guns on one target is how duels stop being coin flips.",
         "Keep joining your teammate's fight from the first shot. Even a few bullets of damage change who wins it."),
@@ -59,8 +62,8 @@ RULES = {
         "Keep dying next to someone, and make the fight last: the longer the killer's aim stays on you, the easier the trade."),
 }
 
-BASE_IMPACT = {'clutch': 60, 'opening_kill': 50, 'retake_kill': 50, 'multi_kill': 45, 'flash_kill': 40, 'trade_kill': 42, 'good_anchor': 40,
-               'reposition_kill': 20, 'fight_support': 35, 'flash_assist': 32, **__import__('positioning').BASE_POS, **__import__('flags_extra').BASE_POS, 'util_damage': 30, 'survived_damage': 25, 'util_on_signal': 20, 'saved_rifle': 25, 'died_tradeable': 25}
+BASE_IMPACT = {'clutch_exit_kills': 25, 'clutch': 60, 'opening_kill': 50, 'retake_kill': 50, 'multi_kill': 45, 'flash_kill': 40, 'trade_kill': 42, 'good_anchor': 40,
+               'reposition_kill': 20, 'fight_support': 35, 'flash_assist': 32, **__import__('positioning').BASE_POS, **__import__('flags_extra').BASE_POS, 'util_damage': 30, 'survived_damage': 25, 'util_on_signal': 20, 'saved_rifle': 12, 'died_tradeable': 25}
 
 
 for _k in __import__('flags_extra').RETIRED:
@@ -77,6 +80,8 @@ def impact(m):
     if m.get('won') is True: add(rm, 'round won')
     elif m.get('won') is False: add(-rm, 'round still lost')
     if k == 'clutch': add(12 * (m.get('vs', 1) - 1), f"1v{m.get('vs')}")
+    if k == 'saved_rifle': add(min(14, int((m.get('saved') or 0) // 350)), f"${m.get('saved')} of equipment kept")
+    if k == 'clutch_exit_kills': add(min(16, 8 * (m.get('kills', 1) - 1)), f"{m.get('kills')} kills after the last teammate died")
     if k == 'multi_kill': add(10 * (m.get('kills', 2) - 2), f"{m.get('kills')} kills")
     if k in ('opening_kill', 'flash_kill', 'trade_kill', 'retake_kill', 'reposition_kill') and m.get('headshot'): add(3, 'headshot')
     if k == 'opening_kill' and (m.get('time') or 99) < 20: add(5, 'before 20 s')
@@ -99,6 +104,7 @@ def impact(m):
     if k == 'flash_kill': add(min(6, int(m.get('kills', 1) - 1) * 6), 'more than one blind kill')
     if k in ('watched_bomb', 'held_plant_spot', 'swung_own_flash', 'flash_in_fight', 'attacked_off_view', 'fought_with_cover', 'pistol_switch') and m.get('got_kill'): add(8, 'and the kill followed')
     if k == 'committed_defuse' and m.get('finished'): add(10, 'the defuse finished')
+    if k == 'flash_turned_kill' and m.get('got_kill'): add(6, 'and you took the kill yourself')
     if k == 'defuse_fake' and m.get('punished'): add(10, 'an enemy died peeking it')
     if k == 'held_angle' and m.get('headshot'): add(3, 'headshot')
     if k == 'rotated_on_info': add(min(10, int((m.get('dmg') or 0) // 25)), f"{m.get('dmg')} damage after arriving")
@@ -278,6 +284,17 @@ def detect(D):
                 x, h0 = fought; kd = rd[(rd['user_steamid'] == str(x.user_steamid)) & (rd['attacker_team_num'] == team) & (rd['tick'] >= t) & (rd['tick'] <= t + int(float(x.blind_duration) * TICK))]
                 mp = mine[mine.index <= t]; mp = (mp.iloc[-1].X, mp.iloc[-1].Y) if len(mp) else None
                 if mp is not None: card(t, 'flash_in_fight', mp, x.user_name, None, f"Round {rn+1}, {side}, {rt(t, rn)} s. Your flash blinded {x.user_name} for {float(x.blind_duration):.1f} s and {h0['attacker_name']} hit them {(int(h0['tick']) - t) / TICK:.1f} s into it." + (f" {kd.iloc[0]['attacker_name']} killed them." if len(kd) else ""), place=None, got_kill=bool(len(kd)))
+        # exit kills in a lost clutch
+        team_deaths = rd[rd['user_team_num'] == team]
+        if not won and len(team_deaths) >= 4:
+            others_dead = team_deaths[team_deaths['user_steamid'] != me]
+            if len(others_dead) >= 4:
+                t_last = int(others_dead.iloc[3]['tick'])
+                if not len(rdm) or int(rdm.iloc[0]['tick']) > t_last:
+                    k_after = rk[rk['tick'] > t_last]
+                    if len(k_after):
+                        k0 = k_after.iloc[0]
+                        card(int(k0['tick']), 'clutch_exit_kills', (k0['attacker_X'], k0['attacker_Y']), str(k0['user_name']), (k0['user_X'], k0['user_Y']), f"Round {rn+1}, {side}. Last alive from {rt(t_last, rn)} s; the round was lost, and you killed {', '.join(k_after['user_name'])} after that.", place=k0['attacker_last_place_name'], victim_sid=k0['user_steamid'], kills=len(k_after))
         # clutch
         team_deaths = rd[rd['user_team_num'] == team]
         if won and not died and len(team_deaths) >= 4:
@@ -372,8 +389,9 @@ def detect(D):
             et = int(endpos.index[-1]); lp = (endpos.iloc[-1].X, endpos.iloc[-1].Y)
             if not died and dmg >= 100:
                 card(et, 'survived_damage', lp, None, None, f"Round {rn+1}, {side}. {dmg} damage, {len(rk)} kills, survived the round.", place=endpos.iloc[-1].last_place_name, dmg=dmg)
-            if not died and not won and equip >= 3000:
-                card(et, 'saved_rifle', lp, None, None, f"Round {rn+1}, {side}. Round lost, you survived with ${equip} of equipment bought at freeze time.", place=endpos.iloc[-1].last_place_name)
+            timed_out = D.get('round_reason', {}).get(rn) in ('target_saved', 'time_ran_out')
+            if not died and not won and equip >= 1000 and not (side == 'T' and timed_out):
+                card(et, 'saved_rifle', lp, None, None, f"Round {rn+1}, {side}. Round lost, you survived with ${equip} of equipment bought at freeze time, kept for the next round.", place=endpos.iloc[-1].last_place_name, saved=equip)
         # deaths-based: traded death, good anchor
         for d in rdm.itertuples():
             t = int(d.tick); pos = (d.user_X, d.user_Y)

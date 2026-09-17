@@ -6,7 +6,7 @@ Cards are drawn as a shared radar background plus a small inline SVG overlay, so
 Usage:
     python performance_report.py <demo.dem> [--player 76561198063294402] [--out report.html]
 """
-import sys, os, argparse, html, json, time, math, pickle, tempfile, collections as C
+import sys, os, re, argparse, html, json, time, math, pickle, tempfile, collections as C
 import concurrent.futures as CF
 for _s in (sys.stdout, sys.stderr):
     try: _s.reconfigure(encoding='utf-8', errors='replace')    # player names can contain any Unicode; the pipe to the app is UTF-8
@@ -80,6 +80,12 @@ html{scroll-behavior:smooth}small{color:#999}
 .ctl input[type=range]{flex:1;accent-color:#7a86a8}.ctl .tl{min-width:52px;text-align:right;font-variant-numeric:tabular-nums;color:#cfd3dc}
 .ctl button,.ctl select{background:#2a2e3a;color:#dfe3ea;border:0;border-radius:4px;padding:3px 9px;cursor:pointer;font-size:12px}.ctl button{min-width:34px}
 .rlk{font-size:11px;color:#6f7482;margin-top:3px}
+.showsel{display:flex;gap:10px;margin:12px 0 0}.showsel label{cursor:pointer}.showsel input{display:none}
+.showsel span{display:block;background:#1d2130;border:1px solid #333;border-left:6px solid #555;border-radius:8px;padding:8px 14px;min-width:150px;color:#cfd3dc}
+.showsel span b{display:block;font-size:14px}.showsel span small{color:#9aa0ad}.showsel span:hover{border-color:#666;background:#232838}
+.showsel span.sp{border-left-color:#3c8c4c}.showsel span.sm{border-left-color:#8c3c3c}
+.showsel input:checked+span{background:#2a3044;border-color:#8fa3d8;color:#fff}.showsel input:checked+span small{color:#cfd3dc}
+body.show-p .side-m,body.show-m .side-p{display:none !important}body.show-p .card.nosides,body.show-m .card.nosides{display:none}
 .jb{background:#2a2e3a;color:#dfe3ea;border:0;border-radius:4px;padding:1px 7px;margin-left:6px;cursor:pointer;font-size:11px}.jb:hover{background:#3a4052}
 .facts{font-size:14px;line-height:1.5}.k{font-weight:600}
 .badge{display:inline-block;color:#fff;font-weight:700;padding:4px 10px;border-radius:6px;margin-bottom:6px}
@@ -104,6 +110,12 @@ function goHash(){
   el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 window.addEventListener('hashchange', goHash);
+function setShow(v){
+  document.body.classList.remove('show-p','show-m'); if(v==='p'||v==='m') document.body.classList.add('show-'+v);
+  document.querySelectorAll('.card').forEach(function(c){ var s=c.getAttribute('data-sides')||''; c.classList.toggle('nosides', (v==='p'||v==='m') && s.indexOf(v)<0); });
+  try{ localStorage.setItem('cs2report-show', v); }catch(e){}
+  var r=document.querySelector("input[name='show'][value='"+v+"']"); if(r) r.checked=true;
+}
 function toggleList(id, chip){
   var el=document.getElementById(id); if(!el) return false;
   var open=!el.classList.contains('on');
@@ -218,6 +230,7 @@ function rpInitAll(){
 }
 window.addEventListener('DOMContentLoaded',function(){
   rpInitAll();
+  try{ var sv=localStorage.getItem('cs2report-show'); if(sv==='p'||sv==='m') setShow(sv); }catch(e){}
   var h=location.hash.replace('#',''), first=document.querySelector('.player');
   if(h && document.getElementById(h) && document.getElementById(h).classList.contains('player')) showPlayer(h);
   else if(first){ showPlayer(first.id); if(h) goHash(); }
@@ -416,20 +429,20 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
     lists = []
     for key in cat_order:
         vals = cat[key]; t = sum(vals); a = round(t / len(vals)); lid = f"{pid}-list-{key[0]}-{key[1]}"
-        h.append(f"<a class='chip' href='#' onclick=\"return toggleList('{lid}', this)\" style='border-left:6px solid {css_for(a)}'><b>{len(vals)}</b>{esc(allrules[key][0])}<br><small>impact <span class='v' style='color:{css_for(t)}'>{t:+d}</span> &middot; avg {a:+d} &middot; {len(vals)} instance{'s' if len(vals) != 1 else ''}</small></a>")
+        h.append(f"<a class='chip side-{key[0]}' href='#' onclick=\"return toggleList('{lid}', this)\" style='border-left:6px solid {css_for(a)}'><b>{len(vals)}</b>{esc(allrules[key][0])}<br><small>impact <span class='v' style='color:{css_for(t)}'>{t:+d}</span> &middot; avg {a:+d} &middot; {len(vals)} instance{'s' if len(vals) != 1 else ''}</small></a>")
         rows = []
         for k, f in inst[key]:
             snippet = esc(f['facts'])
             head = snippet.split('. ', 1)[1] if '. ' in snippet else snippet
             rows.append(f"<a class='li' href='#{mid[k]}' style='border-left:4px solid {css_for(f['impact'])}'><span class='badge' style='background:{css_for(f['impact'])}'>{f['impact']:+d}</span> <b>Round {k[0]}, {esc(f['side'])}, {k[1]} s</b>{(' at ' + esc(f['place'])) if f.get('place') else ''} <span class='sn'>{head[:220]}</span></a>")
         # the panel sits right after its chip inside the flex row and spans the full width, so it opens directly under the chip's row
-        h.append(f"<div class='chipl' id='{lid}'><div class='lh'><b>{esc(allrules[key][0])}</b> &middot; {len(vals)} instance{'s' if len(vals) != 1 else ''}, in round order &middot; click one to open its card <a href='#{pid}-guide-{key[0]}-{key[1]}' class='g'>what to do</a></div>{''.join(rows)}</div>")
+        h.append(f"<div class='chipl side-{key[0]}' id='{lid}'><div class='lh'><b>{esc(allrules[key][0])}</b> &middot; {len(vals)} instance{'s' if len(vals) != 1 else ''}, in round order &middot; click one to open its card <a href='#{pid}-guide-{key[0]}-{key[1]}' class='g'>what to do</a></div>{''.join(rows)}</div>")
     h.append("</div>")
     # ranked lists link to moments
     def ranked_m(positive, title):
         items = sorted(keys, key=lambda k: (-sum(f['impact'] for f in moments[k]) if positive else sum(f['impact'] for f in moments[k])))
         items = [k for k in items if (sum(f['impact'] for f in moments[k]) > 0) == positive][:6]
-        return f"<div class='box'><b>{title}</b><ol>" + ''.join(f"<li><a href='#{mid[k]}' style='color:inherit;text-decoration:none'><span style='color:{css_for(sum(f['impact'] for f in moments[k]))};font-weight:700'>{sum(f['impact'] for f in moments[k]):+d}</span> &nbsp; R{k[0]} {moments[k][0]['side']} {k[1]}s{(' at ' + esc(moments[k][0]['place'])) if moments[k][0].get('place') else ''}: {esc('; '.join(title_of(f) for f in moments[k]))}</a></li>" for k in items) + "</ol></div>"
+        return f"<div class='box side-{'p' if positive else 'm'}'><b>{title}</b><ol>" + ''.join(f"<li><a href='#{mid[k]}' style='color:inherit;text-decoration:none'><span style='color:{css_for(sum(f['impact'] for f in moments[k]))};font-weight:700'>{sum(f['impact'] for f in moments[k]):+d}</span> &nbsp; R{k[0]} {moments[k][0]['side']} {k[1]}s{(' at ' + esc(moments[k][0]['place'])) if moments[k][0].get('place') else ''}: {esc('; '.join(title_of(f) for f in moments[k]))}</a></li>" for k in items) + "</ol></div>"
     h.append("<div class='two'>" + ranked_m(False, 'Biggest negative moments') + ranked_m(True, 'Biggest positive moments') + "</div>")
     # ---- timeline
     h.append(f"<h2>Timeline ({len(keys)} moments in {len(clusters)} cards, in order)</h2>")
@@ -532,19 +545,20 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
             note = f"<div class='br'>{esc(f['util_note'])}</div>" if f.get('util_note') else ''
             rel = round((round(f['time'] or 0, 1)) - (k[1] or 0), 2)
             jump = f"<button class='jb' onclick='rpJump(this, {rel})' title='Show the replay at this moment'>&#9654; {round(f['time'] or 0, 1)} s</button>" if len(ks) > 1 else ''
-            blocks.append(f"<div class='flag' style='border-left:4px solid {fc}'><div><span class='badge' style='background:{fc}'>{f['impact']:+d}</span> <b>{esc(title_of(f))}</b> {jump}<a href='#{pid}-guide-{f['side_kind']}-{f['kind']}' class='g'>what to do</a></div>"
+            blocks.append(f"<div class='flag side-{f['side_kind']}' style='border-left:4px solid {fc}'><div><span class='badge' style='background:{fc}'>{f['impact']:+d}</span> <b>{esc(title_of(f))}</b> {jump}<a href='#{pid}-guide-{f['side_kind']}-{f['kind']}' class='g'>what to do</a></div>"
                           f"<div class='br'>{esc(' · '.join(f['imp_breakdown']))}</div><div class='facts'>{esc(f['facts'])}</div>{note}</div>")
         ctl = (f"<div class='ctl'><button class='pb' onclick='rpToggle(this)' title='Replay the last 12 s'>&#9654;</button>"
                f"<input type='range' class='sc' min='{rp['t0']}' max='{rp['end']}' step='0.05' value='0' oninput='rpSeek(this)' list='tk-{mid[k]}'><datalist id='tk-{mid[k]}'>{''.join(f'<option value=\"{mk}\"></option>' for mk in marks)}</datalist>"
                f"<span class='tl'>{rp['rt']:.1f} s</span><select class='sp' title='Playback speed'><option value='0.25'>&#188;&#215;</option><option value='0.5'>&#189;&#215;</option><option value='1' selected>1&#215;</option><option value='2'>2&#215;</option></select></div>"
                f"<div class='rlk'>replay: arrow = facing &middot; X = died &middot; white line = shot, bright to the player it hit, faint = a miss, drawn to the nearest wall on the radar &middot; small dots = grenades in flight, with their effects while they last</div>")
-        h.append(f"<div class='card' id='{mid[k]}' style='border-left:8px solid {css}'><div class='mapw'><div class='map {'l' if lower else 'u'}' data-rp='{rp_json}'>{svg}</div>{ctl}</div><div class='facts'>"
+        sides = ''.join(sorted(set(f['side_kind'] for f in fl)))
+        h.append(f"<div class='card' id='{mid[k]}' data-sides='{sides}' style='border-left:8px solid {css}'><div class='mapw'><div class='map {'l' if lower else 'u'}' data-rp='{rp_json}'>{svg}</div>{ctl}</div><div class='facts'>"
                  f"<div class='mh'><span class='badge' style='background:{css}'>Net {mnet:+d}</span> <b>Round {k[0]}, {merged['side']}, {' + '.join(f'{kk[1]} s' for kk in ks)}</b>{(' at ' + esc(merged['place'])) if merged.get('place') else ''} &nbsp; {res}</div>{''.join(blocks)}</div></div>")
     # ---- flag guide, once per kind
     h.append("<h2>Flag guide</h2><small>Why each flag matters and what to do about it, once per flag. Timeline entries link here.</small>")
     for key in cat_order:
         title, why, do = allrules[key]; positive = key[0] == 'p'; accent = IR.imp_css(80) if positive else MR.sev_css(80)
-        h.append(f"<div class='why' id='{pid}-guide-{key[0]}-{key[1]}' style='border-left:4px solid {accent}'><b>{esc(title)}</b> ({len(cat[key])}, impact {sum(cat[key]):+d})<br><b>{'Why it worked' if positive else 'Why it is a mistake'}:</b> {esc(why)}<br><b>{'Keep doing' if positive else 'What to do instead'}:</b> {esc(do)}</div>")
+        h.append(f"<div class='why side-{key[0]}' id='{pid}-guide-{key[0]}-{key[1]}' style='border-left:4px solid {accent}'><b>{esc(title)}</b> ({len(cat[key])}, impact {sum(cat[key]):+d})<br><b>{'Why it worked' if positive else 'Why it is a mistake'}:</b> {esc(why)}<br><b>{'Keep doing' if positive else 'What to do instead'}:</b> {esc(do)}</div>")
     h.append("</div>")
     return '\n'.join(h), dict(net=net, n=len(rounds), wins=wins, losses=losses, avg=net / n)
 
@@ -691,6 +705,9 @@ def build(D, out_path, demo_name, focus=None):
     winner_tn = max(team_wins, key=team_wins.get) if team_wins[2] != team_wins[3] else None
     h = [f"<!doctype html><html><head><meta charset='utf-8'><title>Performance report {D['map']}</title><style>{CSS}{bg_css}</style><script>{JS}</script></head><body>",
          f"<h1>Performance report: {D['map']}</h1><small>{esc(demo_name)}. {len(fz)} rounds. One metric, impact: good plays positive, mistakes negative, every number shows its arithmetic. Pick a player.</small>",
+         "<div class='showsel'><label><input type='radio' name='show' value='all' checked onchange='setShow(this.value)'><span><b>Everything</b><small>plays and mistakes</small></span></label>"
+         "<label><input type='radio' name='show' value='p' onchange='setShow(this.value)'><span class='sp'><b>Things to keep doing</b><small>plays only</small></span></label>"
+         "<label><input type='radio' name='show' value='m' onchange='setShow(this.value)'><span class='sm'><b>Things to improve</b><small>mistakes only</small></span></label></div>",
          "<div class='teams'>"]
     for tn in (3, 2):
         members = sorted(teams[tn], key=lambda x: -stats[x[0]]['avg'])
@@ -723,7 +740,7 @@ def main():
     D = parse(a.demo, a.player)
     _EXPECTED = expected_seconds(len(D['fz']), mb)
     progress(32, f"{len(D['fz'])} rounds; expected total about {_EXPECTED:.0f} s")
-    stats, team_wins = build(D, out, os.path.basename(a.demo), focus=a.player or None)
+    stats, team_wins = build(D, out, re.sub(r'^tmp_\d+_', '', os.path.basename(a.demo)), focus=a.player or None)   # drop the runner's temp prefix
     remember_timing(len(D['fz']), mb, time.time() - _T0)
     print(f"built in {time.time() - _T0:.0f} s")
     print(f"{D['map']}: started-CT {team_wins[3]} rounds, started-T {team_wins[2]} rounds -> {out}")

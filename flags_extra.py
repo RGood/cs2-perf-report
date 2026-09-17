@@ -26,21 +26,41 @@ def best_gun(inv):
         cls = wclass(w)
         if cls in rank and (best is None or rank[cls] > rank[best[1]]): best = (w, cls)
     return best
+# body hits to kill an armoured enemy at close to mid range; a reload is premature when the clip still held about twice that
+BTK = {'ak47': 4, 'sg556': 4, 'sg553': 4, 'aug': 4, 'm4a1': 5, 'm4a4': 5, 'm4a1s': 5, 'famas': 5, 'galil': 5, 'galilar': 5, 'awp': 1, 'ssg08': 2, 'scar20': 2, 'g3sg1': 2,
+       'deagle': 3, 'revolver': 2, 'usps': 5, 'usp': 5, 'glock': 6, 'p2000': 5, 'hkp2000': 5, 'p250': 4, 'fiveseven': 5, 'tec9': 5, 'cz75auto': 5, 'elite': 5,
+       'mp9': 6, 'mp7': 6, 'mac10': 6, 'mp5sd': 6, 'ump45': 5, 'p90': 6, 'bizon': 7, 'ppbizon': 7, 'nova': 2, 'xm1014': 3, 'mag7': 2, 'sawedoff': 2, 'negev': 5, 'm249': 5}
+HIT_RATE = 0.5      # a typical share of shots that land in a duel; shots needed = hits needed / HIT_RATE
+
+
+def enough_for_kill(weapon, ammo):
+    """Would this much ammo plausibly have got a kill? Returns (enough, hits_needed, shots_needed)."""
+    n = norm(weapon); btk = BTK.get(n)
+    if btk is None:
+        for k_, v_ in BTK.items():
+            if k_ in n: btk = v_; break
+    if btk is None: btk = {'rifle': 4, 'sniper': 2, 'smg': 6, 'shotgun': 2, 'pistol': 5}.get(wclass(weapon), 5)
+    need = math.ceil(btk / HIT_RATE)
+    return ammo >= need, btk, need
+
+
 CLIP = {'ak47': 30, 'm4a1': 30, 'm4a4': 30, 'm4a1_silencer': 20, 'm4a1s': 20, 'usps': 12, 'cz75auto': 12, 'famas': 25, 'galilar': 35, 'aug': 30, 'sg556': 30, 'awp': 10, 'ssg08': 10,
         'scar20': 20, 'g3sg1': 20, 'mp9': 30, 'mp7': 30, 'mac10': 30, 'mp5sd': 30, 'ump45': 25, 'p90': 50, 'bizon': 64, 'glock': 20, 'usp_silencer': 12,
         'hkp2000': 13, 'p250': 13, 'fiveseven': 20, 'tec9': 18, 'cz75a': 12, 'deagle': 7, 'revolver': 8, 'elite': 30, 'nova': 8, 'xm1014': 7, 'mag7': 5, 'sawedoff': 7, 'm249': 100, 'negev': 150}
 
 RULES_NEG = {
+    'flash_reacted': ("Flash they turned away from", "Your flash popped within 25 m of an enemy who had been facing it at the throw, and they turned away or ducked before it popped (blinded for under a second, or not at all), then were not punished within 2 s. The flash was readable: too long in the air, or thrown where they could see it coming.", "Pop flashes faster and higher, or from behind cover so the enemy does not see the throw. A flash the enemy can turn from only costs you the grenade."),
+    'alive_at_timeout': ("Alive when the clock ran out", "As a T you were still alive when the round timer expired with no plant. A T who is alive at the time-out gets no loss bonus at all, so the round cost the team's economy as well as the round. Worse still if you were then killed after the timer, losing the gun too.", "Before the last 15 s either plant, force the fight, or make sure you know the timer: a death fighting keeps the loss bonus; running the clock out throws it away."),
     'opener_untradeable': ("Untradeable opener", "You were the round's first death with no teammate within 15 m, and nobody traded you within 5 s. The opening duel was taken from a spot where losing it cost a full player.", "Take the first fight of the round inside trade range, or take it with utility so a loss still gives information."),
     'lost_opener_t': ("Lost T opener", "First death of the round on the T side. The attack starts a man down before any map control is taken.", "Open with utility and a teammate on your shoulder, or let a teammate with a better angle take the first duel."),
     'crosshair_off': ("Crosshair off at first sight", "When an enemy within 35 m first came into your view, your crosshair was more than 15° away from them, and that fight ended in a kill or death.", "Pre-aim the exact spot where the enemy will appear before you swing; moving the crosshair after you see them is the slowest way to start a duel."),
     'first_bullet_missed': ("First bullet missed", "Your first shot in the engagement was aimed at a visible enemy, hit nothing, and you lost the duel. The first bullet is the one fired with the most accuracy and the most surprise.", "Slow the first shot down: counter-strafe to a full stop and place it, then let the spray or burst follow."),
-    'slow_to_damage': ("Slow to damage", "More than 0.7 s passed between an enemy becoming yours to shoot and your first damage on them, and you died to them. The clock starts when they came into your view, or later if they were still fighting a teammate at that moment or you were in a reload you needed. A reload started with 40% or more of the clip left does not excuse the delay; it is the cause of it.", "Decide before the peek. If the crosshair is placed, the first shot goes out on sight."),
+    'slow_to_damage': ("Slow to damage", "More than 0.7 s passed between an enemy becoming yours to shoot and your first damage on them, and you died to them. The clock starts when they came into your view, or later if they were still fighting a teammate at that moment or you were in a reload you needed. A reload does not excuse the delay when the clip still held enough for a kill (about twice the hits that weapon needs, at a typical hit rate); then the reload is the cause of it.", "Decide before the peek. If the crosshair is placed, the first shot goes out on sight."),
     'shot_moving': ("Shot while moving", "More than half of your engagement shots were fired while you were moving faster than a rifle stays accurate (from your positions, not the demo's velocity field), and you died.", "Counter-strafe: tap the opposite key to stop dead, shoot, then move again. Practice it until it is not a decision."),
     'moving_scoped': ("Moving scoped shot", "You fired a scoped sniper shot while moving. A moving scoped shot is almost random.", "Stop fully before the shot, or unscope and reposition."),
     'died_through_smoke': ("Died through smoke", "You were killed by a shot through a smoke. Standing where a smoke can be sprayed is a free kill for the enemy.", "Never stand in the line a smoke covers unless you are the one shooting it. Cross it, or hold off it."),
     'died_to_jumper': ("Died to a jumping player", "Your killer was airborne when they killed you at close range: a jump peek you did not punish.", "Hold the crosshair where the jump lands, not where it starts, and shoot as they land."),
-    'repeek': ("Re-peeked the same angle", "You fired or took damage at a spot, left it, and came back to the same spot within 8 s, then died there. The enemy was waiting for exactly that.", "After showing yourself, change the angle or the timing. Same angle twice is the enemy's easiest kill."),
+    'repeek': ("Re-peeked the same angle", "You fired or took damage at a spot while the enemy had you spotted, left it, and came back to the same spot within 8 s without showing yourself anywhere else in between, then died there. The enemy was waiting for exactly that. Not counted when nobody saw you the first time, or when you showed a different angle first. The demo cannot tell whether another angle existed, so the flag assumes one did; judge that yourself on the map.", "After showing yourself, change the angle or the timing. Same angle twice is the enemy's easiest kill."),
     'wide_swing_alone': ("Wide swing alone", "You died at full speed, closing on your killer over the last second, with no teammate within 15 m to trade.", "Wide swings work with a trade partner or a flash. Alone, shoulder-peek for information instead."),
     'shot_in_back': ("Shot in the back", "At your death you were looking more than 100° away from your killer. The flank was not covered and nobody was watching it.", "Clear behind you before you commit forward, and ask a teammate to watch the flank you cannot."),
     'chased_and_died': ("Chased and died", "After a kill you pushed more than 15 m toward the remaining enemies within 5 s and died.", "After a kill, reset. The enemy knows where you are; let them come to you or re-peek with a teammate."),
@@ -52,7 +72,7 @@ RULES_NEG = {
     'solo_rotation_lost': ("Solo rotation into a lost site", "As CT, two or more teammates had already died at a site, and you entered it alone with no teammate within 20 m and died.", "Wait for the other rotator. Two players retaking together beats two players retaking one after the other."),
     'missed_trade': ("Missed trade", "A teammate died within 15 m of you and their killer stayed in your view for 1.5 s or more afterwards. You fired nothing and did no damage in the next 5 s.", "When a teammate dies next to you, the killer is exposed for a moment. Swing them at once; that moment closes fast."),
     'baited': ("Baited a teammate", "A teammate died within 10 m of you while you were unspotted, you did not fire within 3 s, and you moved away from them.", "If you are close enough to be a trade partner, be one. Moving away after their death is the definition of a bait."),
-    'flashed_myself': ("Flashed myself", "Your own flashbang blinded you for a second or more.", "Turn away or throw it further ahead; a self-flash gives the enemy a free peek."),
+    'flashed_myself': ("Flashed myself", "Your own flashbang blinded you for more than 2 s.", "Turn away or throw it further ahead; a self-flash gives the enemy a free peek."),
     'team_damage': ("Team damage", "You did damage to a teammate with a gun.", "Check the crossfire lines before you fire, and do not shoot past a teammate."),
     'flash_blinded_nobody': ("Flash blinded nobody", "Your flashbang popped with an enemy within 25 m of it and blinded nobody on their team for even half a second.", "Pop flashes go over cover and behind the enemy's line of sight, not in front of them where they can turn away."),
     'flash_no_swing': ("Flash without a swing", "Your flash blinded an enemy for a second or more, but neither you nor a teammate came into their view within 3 s and nobody damaged them.", "A flash is a timer. Somebody must swing while it runs, or it only tells the enemy where you are."),
@@ -62,7 +82,7 @@ RULES_NEG = {
     'bought_vs_save': ("Bought against a team save", "You spent 3500 or more while your team averaged under 2000 of equipment. One rifle among pistols does not win the round; it loses a rifle.", "Buy with the team. If the team saves, save."),
     'saved_with_money': ("Saved with money", "You had 4750 or more but under 3000 of equipment on a round where your team full-bought.", "When the team buys, buy. Money in the bank does not shoot."),
     'no_kit': ("No defuse kit", "A CT full buy without a defuse kit. The kit halves the defuse time and wins post-plants.", "Add the kit to every CT full buy. It is the cheapest round-winning item in the game."),
-    'no_helmet': ("No helmet when it mattered", "You had no helmet, with the money to buy one, while three or more enemies carried weapons a helmet stops from killing with one headshot: pistols other than the Deagle and R8, SMGs, the M4s, Famas, Galil, shotguns, and the AUG beyond mid range. Against an AK, SG 553, AWP, or Scout the helmet changes nothing, so those rounds are not flagged.", "Buy the helmet on every round where the enemy is on pistols, SMGs, or M4-class rifles. It turns their headshot into a survivable hit."),
+    'no_helmet': ("No helmet when it mattered", "You bought a gun with no helmet, with the money for one, on a round your team was buying (not a save or eco), while three or more enemies carried weapons a helmet stops from killing with one headshot: pistols other than the Deagle and R8, SMGs, the M4s, Famas, Galil, shotguns, and the AUG beyond mid range. Against an AK, SG 553, AWP, or Scout the helmet changes nothing, so those rounds are not flagged.", "Buy the helmet on every round where the enemy is on pistols, SMGs, or M4-class rifles. It turns their headshot into a survivable hit."),
     'lost_full_buy_to_pistol': ("Lost a full buy to a pistol", "You died with 3700 or more of equipment to a player with under 1500. The eco player took your rifle.", "Against pistols hold range, hold together, and do not peek into a doorway where a pistol can get close."),
     'bomb_died_with_me': ("Bomb died with me", "You died carrying the bomb before 30 s, away from either site, with no plant started.", "The bomb carrier goes in behind the entry players, never first. If you take the first fight, hand the bomb off."),
     'bomb_abandoned': ("Bomb abandoned", "You dropped the bomb and nobody picked it up for 15 s while you were alive and more than 10 m away from it.", "If you drop the bomb on purpose, call it. If it is dropped by accident, go back for it."),
@@ -73,12 +93,13 @@ RULES_NEG = {
     'clutch_lost_no_damage': ("Clutch lost without damage", "You were the last player alive, the round was lost, and you did no damage after your last teammate died.", "In a clutch, either find the one fight you can win or save the weapon. Doing neither gives the enemy the round and the gun."),
     'died_reloading': ("Died reloading", "You reloaded within 2.5 s of your death and did not fire again before it.", "Reload behind cover, and only when the enemy is not about to peek. In contact, switch to the pistol."),
     'reloaded_in_open': ("Reloaded in the open", "You reloaded while visible to the enemy with one alive within 25 m, and died within 3 s.", "Step behind cover before the reload. Every reload in the open is a free peek for the enemy."),
-    'reload_near_full': ("Reloaded with a near-full clip in contact", "You reloaded with 80% or more of the clip left while an enemy was within 25 m.", "Reload after fights, not during them. A near-full reload throws away the seconds a fight is decided in."),
+    'reload_near_full': ("Reloaded with a kill still in the clip", "You reloaded while an enemy was within 25 m with enough ammo left to plausibly get a kill: about twice the hits that weapon needs, at a typical hit rate.", "Reload after fights, not during them. A near-full reload throws away the seconds a fight is decided in."),
     'died_empty_clip': ("Died with an empty clip", "Your clip was empty at death after firing in the last 2 s: you sprayed dry.", "Count the spray. Stop at a third of the clip and reset, or switch to the pistol."),
     'crouch_peek_rifle': ("Crouch-peeked into a rifle", "You were crouched at death, visible to your killer for a second or more, killed from 15 m or more.", "Crouching in the open only makes you a slower target. Crouch behind cover, never in a lane."),
     'jumped_into_fight': ("Jumped into a fight", "You were airborne at your death, or when you fired your last shots, with the killer within 15 m.", "Jumping into a duel gives up accuracy and movement. Land first, then fight."),
 }
 RULES_POS = {
+    'flash_turned_kill': ("Flash turned them for the kill", "Your flash made an enemy turn away from it before it popped (they were facing it at the throw and facing away at the pop) and your team killed them within 2 s, whether or not they were blinded. Turning an enemy is the flash doing its job even when the blind misses.", "Keep throwing the flash so the enemy has to choose between the blind and the turn; either one is a kill for the teammate swinging."),
     'watched_bomb': ("Watched the bomb post-plant", "An enemy started a defuse while you were alive and had them in view or within 15 m. Kill or not, you were in a position to stop it.", "Keep holding a line onto the bomb after the plant rather than hunting for picks."),
     'held_plant_spot': ("Held the plant spot", "An enemy started the plant while you were alive and had them in view or within 15 m. You were where the plant happens, not at the site entrance.", "Keep holding the plant spot itself; it is where the round is decided."),
     'committed_defuse': ("Committed to the defuse", "You started the defuse with enemies still alive. The card says whether any of them could see you and whether the defuse finished.", "Keep committing when the team has cleared enough, and use the fake when it has not."),
@@ -119,20 +140,20 @@ RULES_POS = {
     'defuse_fake': ("Defuse fake", "You started a defuse with an enemy alive and stopped it without finishing: a fake that forces them to peek. Counts more when an enemy died to your team within 3 s of it.", "Keep faking when the enemy is holding the bomb from a spot a teammate can punish."),
     'pistol_switch_won': ("Switched to pistol and won", "Your primary's clip ran out within 3 s before a kill you got with the pistol.", "Keep the pistol switch instead of the reload in a close fight."),
 }
-BASE_NEG = {'opener_untradeable': 42, 'lost_opener_t': 45, 'crosshair_off': 12, 'first_bullet_missed': 10, 'slow_to_damage': 14, 'shot_moving': 18, 'moving_scoped': 18, 'died_through_smoke': 16,
+BASE_NEG = {'flash_reacted': 14, 'alive_at_timeout': 55, 'opener_untradeable': 42, 'lost_opener_t': 45, 'crosshair_off': 12, 'first_bullet_missed': 10, 'slow_to_damage': 14, 'shot_moving': 18, 'moving_scoped': 18, 'died_through_smoke': 16,
             'died_to_jumper': 10, 'repeek': 36, 'wide_swing_alone': 34, 'shot_in_back': 30, 'chased_and_died': 34, 'ran_into_contact': 18, 'awp_line': 28, 'instant_death': 18, 'rotated_off_early': 34,
             'frozen_on_site': 40, 'solo_rotation_lost': 42, 'missed_trade': 38, 'baited': 42, 'flashed_myself': 12, 'team_damage': 14, 'flash_blinded_nobody': 12, 'flash_no_swing': 10,
             'molotov_on_nothing': 14, 'wasted_he': 12, 'smg_full_buy': 16, 'bought_vs_save': 25, 'saved_with_money': 22, 'no_kit': 14, 'no_helmet': 10, 'lost_full_buy_to_pistol': 20,
             'bomb_died_with_me': 45, 'bomb_abandoned': 34, 'planted_without_cover': 36, 'defuse_too_late': 18, 'solo_retake': 40, 'died_planting': 40, 'clutch_lost_no_damage': 35,
             'died_reloading': 32, 'reloaded_in_open': 28, 'reload_near_full': 10, 'died_empty_clip': 16, 'crouch_peek_rifle': 14, 'jumped_into_fight': 14}
-BASE_POS = {'watched_bomb': 35, 'held_plant_spot': 35, 'committed_defuse': 45, 'swung_own_flash': 25, 'flash_in_fight': 25, 'attacked_off_view': 12, 'fought_with_cover': 12, 'pistol_switch': 12,
+BASE_POS = {'flash_turned_kill': 28, 'watched_bomb': 35, 'held_plant_spot': 35, 'committed_defuse': 45, 'swung_own_flash': 25, 'flash_in_fight': 25, 'attacked_off_view': 12, 'fought_with_cover': 12, 'pistol_switch': 12,
             'opener_traded': 25, 'pre_aimed': 8, 'prefired': 12, 'first_bullet_hit': 6, 'won_after_hit_first': 15, 'counter_strafed': 6, 'wallbang_kill': 15, 'kill_through_smoke': 15,
             'noscope_kill': 10, 'unseen_kill': 12, 'kill_with_cover': 12, 'info_peek_survived': 10, 'caught_rotation': 35, 'post_plant_hold': 30, 'kill_down_a_man': 40, 'weapon_drop': 10,
             'stopped_defuse': 55, 'killed_planter': 45, 'molotov_retreat': 15, 'plant_smoke': 15, 'retake_smoke': 15, 'he_stack': 18, 'killed_full_buy_on_eco': 30, 'exit_frag': 25,
             'picked_rifle_on_eco': 10, 'plant_under_pressure': 35, 'fast_plant': 10, 'defused_under_fire': 55, 'sneaky_defuse': 55, 'defuse_fake': 30, 'pistol_switch_won': 15}
 
 
-RETIRED = set(['multi_kill', 'opening_kill', 'retake_kill', 'kill_down_a_man', 'killed_full_buy_on_eco', 'exit_frag', 'survived_damage', 'won_after_hit_first', 'wallbang_kill', 'kill_through_smoke', 'noscope_kill', 'caught_rotation', 'fast_plant', 'he_stack', 'util_damage', 'molotov_retreat', 'clutch', 'stopped_defuse', 'killed_planter', 'defused_under_fire', 'sneaky_defuse', 'flash_kill', 'flash_assist', 'unseen_kill', 'kill_with_cover', 'pistol_switch_won']) | set(['lost_opener_ct', 'lost_opener_t', 'instant_death', 'died_to_jumper', 'lost_full_buy_to_pistol', 'zero_impact_full_buy', 'died_planting', 'team_flash_death'])   # outcomes rather than decisions: no longer reported (kept in code for reference)
+RETIRED = {'clutch_lost_no_damage'} | set(['multi_kill', 'opening_kill', 'retake_kill', 'kill_down_a_man', 'killed_full_buy_on_eco', 'exit_frag', 'survived_damage', 'won_after_hit_first', 'wallbang_kill', 'kill_through_smoke', 'noscope_kill', 'caught_rotation', 'fast_plant', 'he_stack', 'util_damage', 'molotov_retreat', 'clutch', 'stopped_defuse', 'killed_planter', 'defused_under_fire', 'sneaky_defuse', 'flash_kill', 'flash_assist', 'unseen_kill', 'kill_with_cover', 'pistol_switch_won']) | set(['lost_opener_ct', 'lost_opener_t', 'instant_death', 'died_to_jumper', 'lost_full_buy_to_pistol', 'zero_impact_full_buy', 'died_planting', 'team_flash_death'])   # outcomes rather than decisions: no longer reported (kept in code for reference)
 for _k in RETIRED:
     RULES_POS.pop(_k, None); RULES_NEG.pop(_k, None); BASE_POS.pop(_k, None); BASE_NEG.pop(_k, None)
 
@@ -254,6 +275,36 @@ class Ctx:
         return found
 
 
+def flash_turns(c, D, me, rn, team, ft, end, foes):
+    """For each of my flash pops this round: list of (det_tick, throw_tick, land, [(enemy row at pop, blind_s, dist_m), ...]) where the
+    enemy was within 25 m of the pop, facing the landing point at the throw (within 60 deg) and facing away from it at the pop (over 100 deg)."""
+    out = []
+    dt = D['deton']; pops = dt[(dt['steamid'] == me) & (dt['kind'] == 'flashbang') & (dt['tick'] >= ft) & (dt['tick'] < end)] if len(dt) else dt
+    nd = D['nades']; throws = nd[(nd['total_rounds_played'] == rn) & (nd['weapon'].str.contains('flashbang', na=False))]
+    bl = D['blind']
+    for p_ in pops.itertuples():
+        det = int(p_.tick); land = (float(p_.x), float(p_.y))
+        thr_ = throws[(throws['tick'] <= det) & (throws['tick'] >= det - 4 * TICK)]
+        if not len(thr_): continue
+        thr = int(thr_.iloc[-1]['tick']); g_pop = c.by_tick.get(c.coarse(det)); g_thr = c.by_tick.get(c.coarse(thr))
+        if g_pop is None or g_thr is None: continue
+        turned = []
+        for e in g_pop[(g_pop['team_num'] != team) & (g_pop['is_alive'] == True)].itertuples():
+            if not (e.X == e.X and e.yaw == e.yaw): continue
+            dm = dist_m((float(e.X), float(e.Y)), land)
+            if dm > 25: continue
+            e0 = g_thr[g_thr['steamid'] == e.steamid]
+            if not len(e0) or not (e0.iloc[0]['yaw'] == e0.iloc[0]['yaw']): continue
+            off_thr = ang(float(e0.iloc[0]['yaw']), bearing((float(e0.iloc[0].X), float(e0.iloc[0].Y)), land))
+            off_pop = ang(float(e.yaw), bearing((float(e.X), float(e.Y)), land))
+            if off_thr <= 60 and off_pop >= 100:
+                b_ = bl[(bl['attacker_steamid'] == me) & (bl['user_steamid'] == str(e.steamid)) & ((bl['tick'] - det).abs() <= 2)] if len(bl) else bl
+                blind_s = float(b_['blind_duration'].max()) if len(b_) else 0.0
+                turned.append((e, blind_s, dm, off_thr, off_pop))
+        if turned: out.append((det, thr, land, turned))
+    return out
+
+
 # ----------------------------------------------------------------------------- negatives
 def negatives(D, me):
     c = Ctx(D, me); me = c.me; out = []
@@ -290,7 +341,8 @@ def negatives(D, me):
                 out.append(c.base(rn, side, ft, 'spawn', spawn, kind='saved_with_money', facts=f"Round {rn+1}, {side}. You had ${bal} and ${my_eq} of equipment while your teammates averaged ${avg:.0f}."))
             if side == 'CT' and my_eq >= 3700 and xr.has_defuser == False:
                 out.append(c.base(rn, side, ft, 'spawn', spawn, kind='no_kit', facts=f"Round {rn+1}, CT. ${my_eq} of equipment and no defuse kit."))
-            if xr.has_helmet == False and bal >= 1000:
+            # not on a save: you bought a gun this round and the team is not on an eco (a helmet would break the next buy)
+            if xr.has_helmet == False and bal >= 1000 and my_eq >= 1500 and avg >= 2000:
                 sens = []
                 for f_ in g0[(g0['team_num'] != team) & (g0['team_num'] > 1)].itertuples():
                     try: bg = best_gun([str(w) for w in f_.inventory])
@@ -341,11 +393,24 @@ def negatives(D, me):
             done_rp = False
             for t0, P in sorted(ev_pts):
                 if done_rp or dist_m(P, pos) > 2 or (t - t0) / TICK > 8: continue
-                far = False
+                # the first appearance must have been seen: an enemy had you in view around it (spotted is sticky for 8 s)
+                seen0 = False
+                for ct_ in range(c.coarse(t0 - 8 * TICK) or t0, t0 + TICK, 8):
+                    r_ = c.row(ct_, me)
+                    if r_ is not None and bool(r_['spotted']): seen0 = True; break
+                if not seen0: continue
+                # between leaving and returning you must not have shown yourself from a different angle (A, B, A is a different pattern)
+                far = False; other_angle = False
                 for ct in range(c.coarse(t0), t, 8):
                     r = c.row(ct, me)
-                    if r is not None and dist_m((float(r.X), float(r.Y)), P) > 3: far = True; break
-                if far and killer in foes:
+                    if r is None: continue
+                    dP = dist_m((float(r.X), float(r.Y)), P)
+                    if dP > 3: far = True
+                    if dP > 4 and bool(r['spotted']): other_angle = True; break
+                if not other_angle:
+                    mid = [(int(x.tick), (float(x.user_X), float(x.user_Y))) for x in rf[(rf['tick'] > t0) & (rf['tick'] < t)].itertuples() if x.user_X == x.user_X]
+                    if any(dist_m(q, P) > 4 for _, q in mid): other_angle = True
+                if far and not other_angle and killer in foes:
                     out.append(c.base(rn, side, t, place, pos, kind='repeek', facts=base_facts + f" You had fired or been hit here {(t - t0) / TICK:.1f} s earlier, left, and came back to the same spot.", **kw)); done_rp = True
             # ran into contact: running while unspotted with an unspotted enemy within 20 m in the 3 s before death.
             # "Spotted" is sticky for a short while: a sighting within the last SEEN_MEMORY_S seconds still counts even if line of
@@ -394,29 +459,26 @@ def negatives(D, me):
                                   (((hurt['attacker_steamid'] == killer) & (hurt['user_steamid'].isin(mates))) | ((hurt['user_steamid'] == killer) & (hurt['attacker_steamid'].isin(mates))))]
                         if len(ex):
                             t_ex = int(ex['tick'].max()); md_ = rd[(rd['attacker_steamid'] == killer) & (rd['user_steamid'].isin(mates)) & (rd['tick'] >= fs) & (rd['tick'] <= t_hit)]
-                            if len(md_): t_ex = max(t_ex, int(md_.iloc[0]['tick'])); notes.append(f"{d.attacker_name} was fighting {md_.iloc[0]['user_name']}, who died at {c.rt(int(md_.iloc[0]['tick']), rn)} s")
-                            else: notes.append(f"{d.attacker_name} was trading damage with a teammate until {c.rt(t_ex, rn)} s")
-                            clock = max(clock, t_ex)
+                            if len(md_): t_ex = max(t_ex, int(md_.iloc[0]['tick']))
+                            if t_ex > clock:
+                                notes.append(f"{d.attacker_name} was fighting {md_.iloc[0]['user_name']}, who died at {c.rt(int(md_.iloc[0]['tick']), rn)} s" if len(md_) else f"{d.attacker_name} was trading damage with a teammate until {c.rt(t_ex, rn)} s")
+                                clock = t_ex
                         # a reload in progress: you cannot shoot, so its time does not count, unless it was a poorly timed reload
                         rl_ = D.get('reloads'); rl_ = rl_[(rl_['user_steamid'] == me) & (rl_['tick'] >= fs - int(2.5 * TICK)) & (rl_['tick'] < t_hit)] if rl_ is not None and len(rl_) else None
                         bad_reload = None
                         if rl_ is not None and len(rl_):
                             t_rl = int(rl_.iloc[-1]['tick']); xr_ = c.x(t_rl, me)
                             if not len(rf[(rf['tick'] > t_rl) & (rf['tick'] < t_hit)]) or t_rl >= fs - int(2.5 * TICK):
-                                mx_ = None; left_ = None
-                                if xr_ is not None and xr_.active_weapon_ammo == xr_.active_weapon_ammo:
-                                    nm_ = norm(str(xr_.active_weapon_name)); mx_ = CLIP.get(nm_)
-                                    if mx_ is None:
-                                        for k_, v_ in CLIP.items():
-                                            if norm(k_) in nm_: mx_ = v_; break
-                                    left_ = float(xr_.active_weapon_ammo)
-                                if mx_ and left_ is not None and left_ >= 0.4 * mx_:
-                                    bad_reload = (t_rl, int(left_), mx_)
+                                left_ = float(xr_.active_weapon_ammo) if xr_ is not None and xr_.active_weapon_ammo == xr_.active_weapon_ammo else None
+                                wpn_ = str(xr_.active_weapon_name) if xr_ is not None else ''
+                                enough_, btk_, need_ = enough_for_kill(wpn_, left_) if left_ is not None else (False, None, None)
+                                if enough_:
+                                    bad_reload = (t_rl, int(left_), wpn_, btk_, need_)
                                 else:
-                                    clock = max(clock, t_rl + int(2.5 * TICK)); notes.append(f"you were reloading (started {c.rt(t_rl, rn)} s" + (f" with {int(left_)} of {mx_} rounds left)" if mx_ and left_ is not None else ")"))
+                                    clock = max(clock, t_rl + int(2.5 * TICK)); notes.append(f"you were reloading (started {c.rt(t_rl, rn)} s" + (f" with {int(left_)} rounds left, short of the ~{need_} a kill takes)" if left_ is not None else ")"))
                         delay = (t_hit - clock) / TICK
                         if bad_reload:
-                            out.append(c.base(rn, side, t, place, pos, kind='slow_to_damage', facts=base_facts + f" {d.attacker_name} came into your view at {c.rt(fs, rn)} s; your first damage on them came {(t_hit - fs) / TICK:.1f} s later. You had started a reload at {c.rt(bad_reload[0], rn)} s with {bad_reload[1]} of {bad_reload[2]} rounds still in the clip, so the delay came from a reload you did not need.", bad_reload=True, **kw))
+                            out.append(c.base(rn, side, t, place, pos, kind='slow_to_damage', facts=base_facts + f" {d.attacker_name} came into your view at {c.rt(fs, rn)} s; your first damage on them came {(t_hit - fs) / TICK:.1f} s later. You had started a reload at {c.rt(bad_reload[0], rn)} s with {bad_reload[1]} rounds still in the {wkey(bad_reload[2])}: about {bad_reload[3]} hits kill, so roughly {bad_reload[4]} shots would have done it. The delay came from a reload you did not need yet.", bad_reload=True, **kw))
                         elif delay > 0.7:
                             out.append(c.base(rn, side, t, place, pos, kind='slow_to_damage', facts=base_facts + f" {d.attacker_name} came into your view at {c.rt(fs, rn)} s" + (("; " + '; '.join(notes)) if notes else "") + f". Counting from {c.rt(clock, rn)} s, your first damage on them came {delay:.1f} s later.", **kw))
                     mr0 = c.row(fs, me); kr0 = c.row(fs, killer)
@@ -487,6 +549,31 @@ def negatives(D, me):
                         cen = (float(fo['X'].mean()), float(fo['Y'].mean()))
                         adv = dist_m(p0, cen) - dist_m(pos, cen)
                         if adv > 15: out.append(c.base(rn, side, t, place, pos, kind='chased_and_died', facts=base_facts + f" {(t - int(k0['tick'])) / TICK:.1f} s after killing {k0['user_name']} you had pushed {adv:.0f} m toward the remaining enemies.", **kw))
+        # ---------------- flashes the enemy read and turned away from, unpunished
+        for det, thr, land, turned in flash_turns(c, D, me, rn, team, ft, end, foes):
+            for e, blind_s, dm, off_thr, off_pop in turned:
+                if blind_s >= 1.0: continue
+                kd = rd[(rd['user_steamid'] == str(e.steamid)) & (rd['attacker_team_num'] == team) & (rd['tick'] >= det) & (rd['tick'] <= det + 2 * TICK)]
+                if len(kd): continue
+                mr = c.row(thr, me)
+                if mr is None or not (mr.X == mr.X): continue
+                out.append(c.base(rn, side, det, str(mr['last_place_name']), (float(mr.X), float(mr.Y)), kind='flash_reacted', facts=f"Round {rn+1}, {side}, {c.rt(det, rn)} s. Your flash was in the air {(det - thr) / TICK:.1f} s and popped {dm:.0f} m from {e.name}, who faced it at the throw ({off_thr:.0f}° off) and away from it at the pop ({off_pop:.0f}° off)" + (f", blinded only {blind_s:.1f} s" if blind_s > 0 else ", not blinded at all") + ". Nobody punished the turn within 2 s.", air_s=round((det - thr) / TICK, 2), opponents=[(str(e.name), (float(e.X), float(e.Y)))]))
+                break
+        # ---------------- T alive when the round timer ran out: no loss bonus
+        if side == 'T' and not won and D.get('round_reason', {}).get(rn) in ('target_saved', 'time_ran_out'):
+            t_end = end; alive_end = (not len(rdm)) or int(rdm.iloc[0]['tick']) > t_end
+            if alive_end:
+                mr = c.row(t_end, me)
+                if mr is not None and mr.X == mr.X:
+                    eq_ = int(mr['current_equip_value']) if mr['current_equip_value'] == mr['current_equip_value'] else 0
+                    died_after = bool(len(rdm) and int(rdm.iloc[0]['tick']) > t_end)
+                    # the loss bonus this would have paid: 1400 plus 500 per consecutive loss before it, capped at 3400
+                    streak = 0
+                    for r_ in range(rn - 1, -1, -1):
+                        if r_ in fz and D['winner'].get(r_) is not None and D['winner'].get(r_) != ('CT' if c.team(r_) == 3 else 'T') and c.team(r_) is not None: streak += 1
+                        else: break
+                    bonus = min(3400, 1400 + 500 * streak)
+                    out.append(c.base(rn, side, t_end, str(mr['last_place_name']), (float(mr.X), float(mr.Y)), kind='alive_at_timeout', facts=f"Round {rn+1}, T. The timer ran out with you alive and no plant: no loss bonus (it would have been ${bonus}). You were carrying ${eq_} of equipment" + (" and were killed after the timer, so that went too." if died_after else "."), died_after=died_after, bonus=bonus, equip_kept=eq_))
         # ---------------- clutch lost without damage
         mates_d = rd[rd['user_team_num'] == team]
         if not won and len(mates_d) >= 4 and not len(rdm[rdm['tick'] <= int(mates_d.iloc[-1]['tick'])]) if len(mates_d) else False:
@@ -555,7 +642,7 @@ def negatives(D, me):
                 out.append(c.base(rn, side, t, str(mr['last_place_name']), (float(mr.X), float(mr.Y)), kind='team_damage', facts=f"Round {rn+1}, {side}, {c.rt(t, rn)} s. {dmg} damage to " + ', '.join(f"{n} ({int(v)})" for n, v in td.groupby('user_name')['dmg_health'].sum().items()) + f" with {', '.join(sorted(set(wkey(w) for w in td['weapon'])))}.", dmg=dmg))
         bl = D['blind']
         if len(bl):
-            sf = bl[(bl['total_rounds_played'] == rn) & (bl['attacker_steamid'] == me) & (bl['user_steamid'] == me) & (bl['blind_duration'] >= 1.0)]
+            sf = bl[(bl['total_rounds_played'] == rn) & (bl['attacker_steamid'] == me) & (bl['user_steamid'] == me) & (bl['blind_duration'] > 2.0)]
             for r in sf.itertuples():
                 mr = c.row(int(r.tick), me)
                 if mr is not None: out.append(c.base(rn, side, int(r.tick), str(mr['last_place_name']), (float(mr.X), float(mr.Y)), kind='flashed_myself', facts=f"Round {rn+1}, {side}, {c.rt(int(r.tick), rn)} s. Your own flash blinded you for {float(r.blind_duration):.1f} s."))
@@ -617,12 +704,9 @@ def negatives(D, me):
                     out.append(c.base(rn, side, t, str(mr['last_place_name']), mpos, kind='reloaded_in_open', facts=f"Round {rn+1}, {side}, {c.rt(t, rn)} s. You reloaded while spotted with {near_f[0].name} {dist_m(mpos, (float(near_f[0].X), float(near_f[0].Y))):.0f} m away, and died {(int(rdm.iloc[0]['tick']) - t) / TICK:.1f} s later."))
                 xr2 = c.x(t, me)
                 if xr2 is not None and xr2.active_weapon_ammo == xr2.active_weapon_ammo:
-                    nm_ = norm(str(xr2.active_weapon_name)); mx = CLIP.get(nm_)
-                    if mx is None:
-                        for k_, v_ in CLIP.items():
-                            if norm(k_) in nm_: mx = v_; break
-                    if mx and float(xr2.active_weapon_ammo) >= 0.8 * mx:
-                        out.append(c.base(rn, side, t, str(mr['last_place_name']), mpos, kind='reload_near_full', facts=f"Round {rn+1}, {side}, {c.rt(t, rn)} s. You reloaded your {xr2.active_weapon_name} with {int(xr2.active_weapon_ammo)} of {mx} rounds left while {near_f[0].name} was {dist_m(mpos, (float(near_f[0].X), float(near_f[0].Y))):.0f} m away."))
+                    enough_, btk_, need_ = enough_for_kill(str(xr2.active_weapon_name), float(xr2.active_weapon_ammo))
+                    if enough_:
+                        out.append(c.base(rn, side, t, str(mr['last_place_name']), mpos, kind='reload_near_full', facts=f"Round {rn+1}, {side}, {c.rt(t, rn)} s. You reloaded your {xr2.active_weapon_name} with {int(xr2.active_weapon_ammo)} rounds left while {near_f[0].name} was {dist_m(mpos, (float(near_f[0].X), float(near_f[0].Y))):.0f} m away; about {btk_} hits kill with it, so roughly {need_} shots would have done."))
         # ---------------- moving scoped shots
         for r in rf[rf['weapon'].str.contains('awp|ssg08', na=False)].itertuples():
             t = int(r.tick); xr2 = c.x(t, me)
@@ -840,6 +924,15 @@ def positives(D, me):
                 if alive_me and len(kd):
                     mr = c.row(t, me)
                     if mr is not None: out.append(c.base(rn, side, t, str(mr['last_place_name']), (float(mr.X), float(mr.Y)), kind='defuse_fake', facts=f"Round {rn+1}, CT, {c.rt(t, rn)} s. You started the defuse, stopped, and {kd.iloc[0]['user_name']} died to {kd.iloc[0]['attacker_name']} {(int(kd.iloc[0]['tick']) - t) / TICK:.1f} s later.", extra_pos=(float(kd.iloc[0]['user_X']), float(kd.iloc[0]['user_Y'])) if kd.iloc[0]['user_X'] == kd.iloc[0]['user_X'] else None, extra_label=f"{kd.iloc[0]['user_name']} died"))
+        # ---------------- flashes that turned an enemy for a teammate's or your own kill
+        for det, thr, land, turned in flash_turns(c, D, me, rn, team, ft, end, foes):
+            for e, blind_s, dm, off_thr, off_pop in turned:
+                kd = rd[(rd['user_steamid'] == str(e.steamid)) & (rd['attacker_team_num'] == team) & (rd['tick'] >= det) & (rd['tick'] <= det + 2 * TICK)]
+                if not len(kd): continue
+                k0 = kd.iloc[0]; mr = c.row(thr, me)
+                if mr is None or not (mr.X == mr.X): continue
+                out.append(c.base(rn, side, det, str(mr['last_place_name']), (float(mr.X), float(mr.Y)), kind='flash_turned_kill', facts=f"Round {rn+1}, {side}, {c.rt(det, rn)} s. Your flash popped {dm:.0f} m from {e.name}; they faced it at the throw ({off_thr:.0f}° off) and had turned away by the pop ({off_pop:.0f}° off)" + (f", blinded {blind_s:.1f} s" if blind_s > 0 else ", not blinded") + f". {k0['attacker_name']} killed them {(int(k0['tick']) - det) / TICK:.1f} s after the pop.", got_kill=(str(k0['attacker_steamid']) == me), opponents=[(str(e.name), (float(e.X), float(e.Y)))]))
+                break
         # ---------------- decisions around the bomb, measured whether or not a kill followed
         db = D.get('defuse_begin'); dfd = D.get('defused'); pb = D.get('plant_begin')
         def my_row_at(t):
