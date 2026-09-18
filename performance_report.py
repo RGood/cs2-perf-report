@@ -80,6 +80,10 @@ html{scroll-behavior:smooth}small{color:#999}
 .ctl input[type=range]{flex:1;accent-color:#7a86a8}.ctl .tl{min-width:52px;text-align:right;font-variant-numeric:tabular-nums;color:#cfd3dc}
 .ctl button,.ctl select{background:#2a2e3a;color:#dfe3ea;border:0;border-radius:4px;padding:3px 9px;cursor:pointer;font-size:12px}.ctl button{min-width:34px}
 .rlk{font-size:11px;color:#6f7482;margin-top:3px}
+.viewsel{margin:12px 0 16px}.showsel span.sv{border-left-color:#8fa3d8}#playersview .showsel{margin:0 0 16px}
+.rsel{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}.rb{background:#1d2130;border:1px solid #333;border-radius:6px;color:#dfe3ea;padding:5px 9px;cursor:pointer;font-size:13px;text-align:left}
+.rb small{display:block;color:#9aa0ad;font-size:10px}.rb.on{background:#2a3044;border-color:#8fa3d8}.rb:hover{background:#232838}
+.kf{font-size:13px;padding:3px 0;border-bottom:1px solid #22262f}.kf .kt{color:#9aa0ad;display:inline-block;min-width:52px;font-variant-numeric:tabular-nums}
 .showsel{display:flex;gap:10px;margin:12px 0 0}.showsel label{cursor:pointer}.showsel input{display:none}
 .showsel span{display:block;background:#1d2130;border:1px solid #333;border-left:6px solid #555;border-radius:8px;padding:8px 14px;min-width:150px;color:#cfd3dc}
 .showsel span b{display:block;font-size:14px}.showsel span small{color:#9aa0ad}.showsel span:hover{border-color:#666;background:#232838}
@@ -106,10 +110,31 @@ function showPlayer(id){
 function goHash(){
   var h=location.hash.replace('#',''); if(!h) return;
   var el=document.getElementById(h); if(!el) return;
-  var pl=el.closest('.player'); if(pl && pl.hidden){ showPlayer(pl.id); }
+  var pl=el.closest('.player'); if(pl && pl.hidden){ if(pl.id==='rounds') setView('rounds'); else { var pv=document.getElementById('playersview'); if(pv && pv.hidden) setView('players'); showPlayer(pl.id); } }
   el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 window.addEventListener('hashchange', goHash);
+function showRound(n){
+  document.querySelectorAll('.roundv').forEach(function(e){ e.hidden=true; }); document.querySelectorAll('.rb').forEach(function(e){ e.classList.remove('on'); });
+  var v=document.getElementById('round-'+n); if(!v) return; v.hidden=false; var b=document.getElementById('rb-'+n); if(b) b.classList.add('on');
+  var map=v.querySelector('.map');
+  if(map && !map._rp){ try{ rpGet(map); }catch(e){ console.error('round '+n+' replay failed', e); } }
+  else if(map && map._rp){ rpDraw(map._rp); }
+}
+function ensureRound(){
+  // a round must be visible whenever the Rounds view is: if none is (the view was opened before the page finished loading, or
+  // the selection was lost), open the first
+  var cur=document.querySelector('.roundv:not([hidden])');
+  if(!cur){ var f=document.querySelector('.rb'); if(f) showRound(parseInt(f.id.replace('rb-',''))); return; }
+  var map=cur.querySelector('.map'); if(map && !map._rp){ try{ rpGet(map); }catch(e){ console.error('round replay failed', e); } }
+}
+var _lastPlayer=null;
+function setView(v){
+  var pv=document.getElementById('playersview'); var r=document.querySelector("input[name='view'][value='"+v+"']"); if(r) r.checked=true;
+  if(v==='rounds'){ if(pv) pv.hidden=true; showPlayer('rounds'); ensureRound(); }
+  else { if(pv) pv.hidden=false; var first=document.querySelector('.player:not(#rounds)'); showPlayer(_lastPlayer || (first ? first.id : null)); }
+  try{ localStorage.setItem('cs2report-view', v); }catch(e){}
+}
 function setShow(v){
   document.body.classList.remove('show-p','show-m'); if(v==='p'||v==='m') document.body.classList.add('show-'+v);
   document.querySelectorAll('.card').forEach(function(c){ var s=c.getAttribute('data-sides')||''; c.classList.toggle('nosides', (v==='p'||v==='m') && s.indexOf(v)<0); });
@@ -224,7 +249,7 @@ function rpSeek(i){ var r=rpGet(i); r.playing=false; r.started=true; cancelAnima
 function rpJump(b,rel){ var card=b.closest('.card'), map=card.querySelector('.map'); var r=rpGet(map); r.playing=false; r.started=true; cancelAnimationFrame(r.raf); r.t=Math.min(r.d.end,Math.max(r.d.t0,rel)); rpDraw(r); }
 function rpInitAll(){
   // draw every card's frame at the moment, in small batches so the page stays responsive
-  var maps=Array.prototype.slice.call(document.querySelectorAll('.map[data-rp]')), i=0;
+  var maps=Array.prototype.slice.call(document.querySelectorAll('.map[data-rp]')).filter(function(m){ return !m.closest('.roundv'); }), i=0;
   function batch(){ var n=0; while(i<maps.length && n<25){ if(!maps[i]._rp) rpGet(maps[i]); i++; n++; } if(i<maps.length) setTimeout(batch,0); }
   batch();
 }
@@ -232,7 +257,10 @@ window.addEventListener('DOMContentLoaded',function(){
   rpInitAll();
   try{ var sv=localStorage.getItem('cs2report-show'); if(sv==='p'||sv==='m') setShow(sv); }catch(e){}
   var h=location.hash.replace('#',''), first=document.querySelector('.player');
-  if(h && document.getElementById(h) && document.getElementById(h).classList.contains('player')) showPlayer(h);
+  var rb0=document.querySelector('.rb'); if(rb0 && !document.querySelector('.roundv:not([hidden])')) { var n0=rb0.id.replace('rb-',''); document.getElementById('round-'+n0).hidden=false; rb0.classList.add('on'); }
+  var rv=document.querySelector("input[name='view']:checked"); if(rv && rv.value==='rounds') setView('rounds');
+  if(!window._spWrapped){ var _sp=showPlayer; window.showPlayer=function(id){ if(!id) return; _sp(id); if(id!=='rounds') _lastPlayer=id; }; window._spWrapped=true; }
+  if(h && document.getElementById(h) && document.getElementById(h).classList.contains('player') && h!=='rounds') showPlayer(h);
   else if(first){ showPlayer(first.id); if(h) goHash(); }
 });
 """
@@ -633,6 +661,66 @@ def worker_count(n_players):
     return max(1, min(n_players, os.cpu_count() or 1))
 
 
+def round_replay(D, rn, proj):
+    """Replay data for a whole round: freeze end (t = 0) to the round end plus 3 s. Same format as the card replays."""
+    snap = D['snap']; fz = D['fz']; ft = int(fz[rn]); end = int(D.get('round_end', {}).get(rn, fz.get(rn + 1, int(snap['tick'].max())))) + 3 * 64
+    T = lambda tick: round((int(tick) - ft) / 64, 2)
+    rp = dict(t0=0.0, end=T(end), rt=0.0, mc='#e05cff', p=[], sh=[], marks=[], g=[], fx=[])
+    win = snap[(snap['tick'] >= ft) & (snap['tick'] <= end) & (snap['is_alive'] == True)]
+    dth = D['deaths']; dwin = dth[(dth['tick'] >= ft) & (dth['tick'] <= end + 8) & dth['user_X'].notna()]
+    dead_at = {str(r.user_steamid): (int(r.tick), (float(r.user_X), float(r.user_Y))) for r in dwin.itertuples()}
+    bl = D['blind']
+    for sid, g in win.groupby('steamid'):
+        g = g.sort_values('tick'); tn = int(g['team_num'].iloc[-1])
+        if tn not in (2, 3): continue
+        rows = list(g.itertuples()); keep = rows[::2] + ([rows[-1]] if (len(rows) - 1) % 2 else [])
+        smp = [[T(r.tick), *proj(r.X, r.Y), int(r.yaw if r.yaw == r.yaw else 0), 0] for r in keep if r.X == r.X]
+        if len(smp) < 2 and str(sid) not in dead_at: continue
+        ent = dict(n=str(g['name'].iloc[-1]), m=int(tn == 3), me=0, s=smp)
+        bw = bl[(bl['user_steamid'] == str(sid)) & (bl['tick'] >= ft - 6 * 64) & (bl['tick'] <= end)] if len(bl) else bl
+        if len(bw): ent['fl'] = [[T(r.tick), round(float(r.blind_duration), 2)] for r in bw.itertuples() if float(r.blind_duration) > 0]
+        if str(sid) in dead_at:
+            dtk, dpos = dead_at[str(sid)]; ent['d'] = [T(dtk), *proj(*dpos)]
+        rp['p'].append(ent)
+    team_of = {str(sid): int(g['team_num'].iloc[-1]) for sid, g in win.groupby('steamid')}
+    pr = D['proj']; inwin = pr[(pr['tick'] >= ft) & (pr['tick'] <= end) & (pr['tick'] % 8 == 0) & pr['x'].notna() & pr['y'].notna()]
+    dt_ = D['deton']
+    for (ent_id, kind), g in inwin.groupby(['grenade_entity_id', 'kind']):
+        g = g.sort_values('tick'); ticks = g['tick'].to_numpy()
+        cuts = [0] + [i for i in range(1, len(ticks)) if ticks[i] - ticks[i - 1] > 64] + [len(ticks)]
+        for a, b in zip(cuts[:-1], cuts[1:]):
+            seg = g.iloc[a:b]
+            dd = dt_[(dt_['steamid'] == str(seg['steamid'].iloc[0])) & (dt_['kind'] == kind) & (dt_['tick'] >= int(seg['tick'].iloc[0]) - 2) & (dt_['tick'] <= int(seg['tick'].iloc[-1]) + 2)]
+            if len(dd): seg = seg[seg['tick'] <= int(dd.iloc[0]['tick'])]
+            if len(seg) < 2: continue
+            rp['g'].append(dict(w=kind, m=int(team_of.get(str(seg['steamid'].iloc[0]), 0) == 3), s=[[T(r.tick), *proj(float(r.x), float(r.y))] for r in seg.itertuples()]))
+    fx = D['fx']; fxw = fx[(fx['end'] >= ft) & (fx['tick'] <= end) & fx['x'].notna() & fx['y'].notna()]
+    rp['fx'] = [[T(r.tick), r.kind, *proj(float(r.x), float(r.y)), T(r.end)] for r in fxw.itertuples()]
+    rp['u'] = round((proj(100, 0)[0] - proj(0, 0)[0]) / 100, 4)
+    gf = D['gunfire']; hurt = D['hurt']
+    shots = gf[(gf['tick'] >= ft) & (gf['tick'] <= end)]; hits = hurt[(hurt['tick'] >= ft - 2) & (hurt['tick'] <= end + 2)]
+    for r in shots.itertuples():
+        if not (r.user_X == r.user_X and r.user_yaw == r.user_yaw): continue
+        hh = hits[(hits['attacker_steamid'] == r.user_steamid) & ((hits['tick'] - int(r.tick)).abs() <= 1)]
+        hh = hh[hh['user_X'].notna() & hh['user_Y'].notna()]
+        x1, y1 = proj(r.user_X, r.user_Y)
+        if len(hh): x2, y2 = proj(float(hh.iloc[0]['user_X']), float(hh.iloc[0]['user_Y'])); hit = 1
+        else:
+            e = ray_end(x1, y1, float(r.user_yaw), getattr(r, 'user_Z', None), 60 / 0.0254 * rp['u'])
+            if e is None:
+                ray = 10 / 0.0254; e = proj(r.user_X + math.cos(math.radians(r.user_yaw)) * ray, r.user_Y + math.sin(math.radians(r.user_yaw)) * ray)
+            x2, y2 = e; hit = 0
+        rp['sh'].append([T(r.tick), x1, y1, x2, y2, hit, int(team_of.get(str(r.user_steamid), 0) == 3)])
+    pl = D['plant'][D['plant']['total_rounds_played'] == rn]
+    if len(pl): rp['marks'].append(T(pl.iloc[0]['tick']))
+    # kill feed and round facts
+    feed = []
+    for r in dwin.sort_values('tick').itertuples():
+        if int(r.tick) > end - 3 * 64: continue
+        feed.append((T(r.tick), str(r.attacker_name) if r.attacker_name == r.attacker_name else 'world', str(r.user_name), (r.weapon or '').replace('weapon_', ''), int(team_of.get(str(r.attacker_steamid), 0)) if r.attacker_steamid == r.attacker_steamid else 0))
+    return rp, feed, (T(pl.iloc[0]['tick']) if len(pl) else None)
+
+
 def build(D, out_path, demo_name, focus=None):
     bases, proj, zthr = make_map(D)
     im = bases['upper'].convert('RGB'); w, h = im.size
@@ -705,10 +793,9 @@ def build(D, out_path, demo_name, focus=None):
     winner_tn = max(team_wins, key=team_wins.get) if team_wins[2] != team_wins[3] else None
     h = [f"<!doctype html><html><head><meta charset='utf-8'><title>Performance report {D['map']}</title><style>{CSS}{bg_css}</style><script>{JS}</script></head><body>",
          f"<h1>Performance report: {D['map']}</h1><small>{esc(demo_name)}. {len(fz)} rounds. One metric, impact: good plays positive, mistakes negative, every number shows its arithmetic. Pick a player.</small>",
-         "<div class='showsel'><label><input type='radio' name='show' value='all' checked onchange='setShow(this.value)'><span><b>Everything</b><small>plays and mistakes</small></span></label>"
-         "<label><input type='radio' name='show' value='p' onchange='setShow(this.value)'><span class='sp'><b>Things to keep doing</b><small>plays only</small></span></label>"
-         "<label><input type='radio' name='show' value='m' onchange='setShow(this.value)'><span class='sm'><b>Things to improve</b><small>mistakes only</small></span></label></div>",
-         "<div class='teams'>"]
+                  "<div class='showsel viewsel'><label><input type='radio' name='view' value='players' checked onchange='setView(this.value)'><span><b>Players</b><small>one player's flags, cards and replays</small></span></label>"
+         "<label><input type='radio' name='view' value='rounds' onchange='setView(this.value)'><span class='sv'><b>Rounds</b><small>every round in full, nobody in focus</small></span></label></div>",
+         "<div id='playersview'><div class='teams'>"]
     for tn in (3, 2):
         members = sorted(teams[tn], key=lambda x: -stats[x[0]]['avg'])
         won = winner_tn == tn; tie = winner_tn is None
@@ -719,9 +806,32 @@ def build(D, out_path, demo_name, focus=None):
             st = stats[sid]; a = st['avg']
             h.append(f"<div class='tab' id='tab-{st['pid']}' onclick=\"showPlayer('{st['pid']}')\" style='border-left:5px solid {css_for(a * 4)}'><span class='nm'>{esc(name)}</span><span class='ai' style='color:{css_for(a * 4)}'>{a:+.1f}</span><small>avg impact / round &middot; net {st['net']:+d}</small></div>")
         h.append("</div></div>")
-    h.append("</div>")
+    h.append("</div>" + "<div class='showsel'><label><input type='radio' name='show' value='all' checked onchange='setShow(this.value)'><span><b>Everything</b><small>plays and mistakes</small></span></label>"
+         "<label><input type='radio' name='show' value='p' onchange='setShow(this.value)'><span class='sp'><b>Things to keep doing</b><small>plays only</small></span></label>"
+         "<label><input type='radio' name='show' value='m' onchange='setShow(this.value)'><span class='sm'><b>Things to improve</b><small>mistakes only</small></span></label></div>" + "</div>")   # close teams, then the show selector under the players, then close the players view
+    # rounds tab: every round in full, nobody in focus
+    progress(95, 'building the round replays')
+    rr = ["<div class='player' id='rounds' hidden><h2>Rounds</h2><small>Every round from freeze end to the end, all ten players, nobody highlighted. Blue = CT, orange = T. Pick a round; play or scrub.</small><div class='rsel'>"]
+    rounds_html = []
+    for rn in sorted(fz):
+        try:
+            rp, feed, t_plant = round_replay(D, rn, proj)
+        except Exception as e:
+            print(f"round {rn + 1} replay skipped ({e})", file=sys.stderr); continue
+        w = D['winner'].get(rn); reason = D.get('round_reason', {}).get(rn, '')
+        col = '#508cff' if w == 'CT' else ('#ffaa3c' if w == 'T' else '#999')
+        rr.append(f"<button class='rb' id='rb-{rn}' onclick='showRound({rn})' style='border-left:5px solid {col}'>R{rn + 1}<small>{esc(w or '?')} · {esc(str(reason).replace('_', ' '))}</small></button>")
+        rows = ''.join(f"<div class='kf'><span class='kt'>{t:.1f} s</span> <span style='color:{'#508cff' if tn == 3 else ('#ffaa3c' if tn == 2 else '#aaa')}'>{esc(a)}</span> &rarr; {esc(v)} <small>{esc(wp)}</small></div>" for t, a, v, wp, tn in feed)
+        plant_line = f"<div class='kf'><span class='kt'>{t_plant:.1f} s</span> bomb planted</div>" if t_plant is not None else ''
+        ctl = (f"<div class='ctl'><button class='pb' onclick='rpToggle(this)' title='Play the round'>&#9654;</button>"
+               f"<input type='range' class='sc' min='0' max='{rp['end']}' step='0.05' value='0' oninput='rpSeek(this)' list='tk-round-{rn}'><datalist id='tk-round-{rn}'>{''.join(f'<option value=\"{mk}\"></option>' for mk in rp['marks'])}</datalist>"
+               f"<span class='tl'>0.0 s</span><select class='sp' title='Playback speed'><option value='0.25'>&#188;&#215;</option><option value='0.5'>&#189;&#215;</option><option value='1' selected>1&#215;</option><option value='2'>2&#215;</option><option value='4'>4&#215;</option></select></div>")
+        svg = "<svg viewBox='0 0 900 900' xmlns='http://www.w3.org/2000/svg' font-family='Segoe UI,Arial' font-size='12'><g class='st'></g></svg>"
+        rounds_html.append(f"<div class='roundv' id='round-{rn}' hidden><div class='card' style='border-left:8px solid {col}'><div class='mapw'><div class='map u' data-rp='{esc(json.dumps(rp, separators=(',', ':')))}'>{svg}</div>{ctl}</div>"
+                           f"<div class='facts'><div class='mh'><b>Round {rn + 1}</b> &nbsp; <span style='color:{col}'>{esc(w or '?')} won</span> &middot; {esc(str(reason).replace('_', ' '))} &middot; {rp['end'] - 3:.0f} s</div>{plant_line}{rows if rows else '<div class=kf>no deaths</div>'}</div></div></div>")
+    rr.append("</div>" + ''.join(rounds_html) + "</div>")
     order = ([focus] if focus in bodies else []) + [s for s in bodies if s != focus]
-    h.extend(bodies[s] for s in order); h.append("</body></html>")
+    h.extend(bodies[s] for s in order); h.extend(rr); h.append("</body></html>")
     progress(96, 'writing the page')
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     open(out_path, 'w', encoding='utf-8').write('\n'.join(h))

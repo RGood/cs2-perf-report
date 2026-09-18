@@ -263,6 +263,23 @@ SUPPORT_RANGE_M = 30  # beyond this you could not realistically have joined
 PEEK_RANGE_M = 20     # within this you could have peeked even without line of sight
 
 
+def aimed_shots(D, by_tick, coarse, rn, t0, t1, shooters, targets, max_m=60.0, deg=10.0):
+    """Shots in [t0, t1] by any of `shooters` aimed within `deg` degrees of any of `targets` (alive, within max_m). A shot fired at
+    a player is a fight whether or not it lands, which player_hurt alone would miss."""
+    fire = D['gunfire']; sh = fire[(fire['total_rounds_played'] == rn) & (fire['tick'] >= t0) & (fire['tick'] <= t1) & (fire['user_steamid'].isin(shooters))]
+    n = 0
+    for s in sh.itertuples():
+        if not (s.user_X == s.user_X and s.user_yaw == s.user_yaw): continue
+        g = by_tick.get(coarse(int(s.tick)))
+        if g is None: continue
+        for tr in g[(g['steamid'].isin(targets)) & (g['is_alive'] == True)].itertuples():
+            d = math.dist((s.user_X, s.user_Y), (tr.X, tr.Y)) * M
+            if d > max_m: continue
+            off = abs(((math.degrees(math.atan2(tr.Y - s.user_Y, tr.X - s.user_X)) - float(s.user_yaw) + 180) % 360) - 180)
+            if off < deg: n += 1; break
+    return n
+
+
 def teammate_fights(D, me, by_tick, coarse, rn, team):
     """For each teammate death in round rn: the fight window, my ability to help, and when I actually engaged the killer.
     Returns a list of dicts (one per teammate death where the killer is an enemy)."""
@@ -286,6 +303,10 @@ def teammate_fights(D, me, by_tick, coarse, rn, team):
         mine = hurt[(hurt['total_rounds_played'] == rn) & (hurt['tick'] >= t_start - TICK) & (hurt['tick'] <= t_death) &
                     (((hurt['attacker_steamid'] == me) & (hurt['user_steamid'] != E)) | ((hurt['user_steamid'] == me) & (hurt['attacker_steamid'] != E)))]
         busy = len(mine) > 0
+        if not busy:
+            g0_ = by_tick.get(coarse(t_start)); foe_ids_ = set(str(x) for x in g0_[(g0_['team_num'] != team) & (g0_['team_num'] > 1)]['steamid']) if g0_ is not None else set()
+            others_ = foe_ids_ - {E}
+            if aimed_shots(D, by_tick, coarse, rn, t_start - TICK, t_death, foe_ids_, {me}) or (others_ and aimed_shots(D, by_tick, coarse, rn, t_start - TICK, t_death, {me}, others_)): busy = True
         # my damage on E before the death, and my first engagement of E (damage, or a shot while E was in my view)
         dmg_before = int(hurt[(hurt['total_rounds_played'] == rn) & (hurt['attacker_steamid'] == me) & (hurt['user_steamid'] == E) & (hurt['tick'] >= t_start) & (hurt['tick'] < t_death)]['dmg_health'].clip(upper=100).sum())
         after = hurt[(hurt['total_rounds_played'] == rn) & (hurt['attacker_steamid'] == me) & (hurt['user_steamid'] == E) & (hurt['tick'] >= t_death) & (hurt['tick'] <= t_death + 4 * TICK)]
@@ -676,6 +697,9 @@ def detect(D):
             # my own involvement: damage with anyone, or any enemy seeing me, or blind, or dead
             mine_h = hurt_rn[(hurt_rn['tick'] >= t0 - TICK) & (hurt_rn['tick'] <= t1 + TICK) & ((hurt_rn['attacker_steamid'] == me) | (hurt_rn['user_steamid'] == me))]
             if len(mine_h): continue
+            g0_ = by_tick.get(fz[rn]); foe_ids_ = set(str(x) for x in g0_[(g0_['team_num'] != team) & (g0_['team_num'] > 1)]['steamid']) if g0_ is not None else set()
+            if aimed_shots(D, by_tick, coarse0, rn, t0 - TICK, t1 + TICK, foe_ids_, {me}): continue   # shot at: in a fight
+            if aimed_shots(D, by_tick, coarse0, rn, t0 - TICK, t1 + TICK, {me}, foe_ids_ - {E}): continue                # shooting at someone else
             engaged = hurt_rn[(hurt_rn['tick'] >= t0) & (hurt_rn['tick'] <= t1 + 4 * TICK) & (hurt_rn['attacker_steamid'] == me) & (hurt_rn['user_steamid'] == E)]
             if len(engaged): continue
             ok = True; min_dist = None; d_first = None; d_last = None; my_place = None; my_pos = None; e_pos = None; t_pos = None
@@ -769,7 +793,7 @@ def detect(D):
             t = f['t_death']
             pt = mine[(mine.index >= t - 12 * TICK) & (mine.index <= t)]
             facts = (f"Round {rn+1}, {side}, {rt(t, rn)} s. {f['mate']} fought {f['enemy']} for {f['dur']:.1f} s ({rt(f['t_start'], rn)} s to {rt(t, rn)} s) and died at {f['mate_place']}. "
-                     f"You were {f['min_dist']:.0f} m from {f['enemy']} at {f['my_place']}, not in a fight and not flashed. "
+                     f"You were {f['min_dist']:.0f} m from {f['enemy']} at {f['my_place']}, not in a fight (no damage given or taken, nobody shooting at you, you shooting at nobody) and not flashed. "
                      + (f"{f['enemy']} had you in view from {rt(f['saw_from'], rn)} s. " if saw else f"You had no line of sight but were within {PEEK_RANGE_M} m and could have peeked. ")
                      + f"You did no damage during the fight and first engaged {f['enemy']} {(f['t_engage'] - t) / TICK:.1f} s after {f['mate']} died"
                      + (f"; {f['enemy']} had {f['enemy_hp']} hp left." if f['enemy_hp'] is not None else '.'))
@@ -881,9 +905,9 @@ def detect(D):
 
 # ----------------------------------------------------------------------------- severity
 BASE_SEVERITY = {
-    'zero_impact_full_buy': 50, 'lost_opener_ct': 50, 'separated_from_team': 45, 'early_solo_contact': 45,
-    'kill_then_die': 14, 'util_too_early': 36, 'util_unused': 34, 'spray_at_range': 30, 'died_blind': 28, 'util_on_timer': 30,
-    'missed_at_range': 26, 'held_alone': 28, 'eco_wander': 20, 'late_support': 40, 'sat_out': 32, 'team_flash': 22, 'team_flash_death': 48, 'team_util_damage': 20,
+    'zero_impact_full_buy': 50, 'lost_opener_ct': 50, 'separated_from_team': 30, 'early_solo_contact': 32,
+    'kill_then_die': 10, 'util_too_early': 26, 'util_unused': 34, 'spray_at_range': 24, 'died_blind': 16, 'util_on_timer': 20,
+    'missed_at_range': 26, 'held_alone': 26, 'eco_wander': 20, 'late_support': 40, 'sat_out': 32, 'team_flash': 14, 'team_flash_death': 48, 'team_util_damage': 20,
     **__import__('positioning').BASE_NEG,
     **__import__('flags_extra').BASE_NEG,
 }
@@ -899,6 +923,7 @@ def severity(m):
         nonlocal score
         if v:
             score += v; br.append(f"{v:+d} {why}")
+    ctx0 = score
     rm = int(round(min(10, max(3, 0.25 * BASE_SEVERITY.get(k, 40)))))
     if m.get('won') is False: add(rm, 'round lost')
     elif m.get('won') is True: add(-rm, 'round won anyway')
@@ -911,6 +936,8 @@ def severity(m):
     if eq is not None and k not in ('eco_wander', 'util_on_timer', 'kill_then_die'):
         if eq >= 3700: add(6, 'full buy lost')
         elif eq < 1500: add(-8, 'eco round')
+    # the context modifiers above describe the death, not the decision: together they may add at most 10
+    if score - ctx0 > 10: add(-(score - ctx0 - 10), 'context modifiers capped at +10 in total')
     if k == 'util_unused':
         add(min(8, 4 * (m.get('n_usable', 1) - 1)), 'more than one usable grenade held')
         add(4 if (m.get('after') or 0) >= 8 else 0, '8 s or more of contact to use it')
@@ -935,6 +962,7 @@ def severity(m):
         add(min(15, int((m.get('dmg') or 0) // 5)), f"{m.get('dmg')} damage to teammates")
         add(20 if m.get('mate_died') else 0, 'a teammate died from it')
     if k == 'flash_reacted': add(min(8, int((m.get('air_s') or 0) * 3)), f"{m.get('air_s')} s in the air")
+    if k == 'solo_retake' and m.get('last_alive'): add(-15, f"last alive against {m.get('foes_left')}: a save was the only alternative")
     if k == 'alive_at_timeout':
         add(10 if m.get('died_after') else 0, 'killed after the timer as well: the gun went too')
         add(min(8, int((m.get('bonus') or 1400) // 500) - 2), f"a ${m.get('bonus')} loss bonus forfeited")

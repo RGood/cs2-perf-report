@@ -39,7 +39,7 @@ RULES_POS = {
         "Keep reacting to the team's information. The first player to arrive at the real fight is usually the one who decides it."),
 }
 BASE_NEG = {'crossfire': 36, 'swung_into_hold': 38, 'seen_first': 34, 'their_range': 32, 'empty_site': 38, 'absent_hit': 38}
-BASE_POS = {'held_angle': 25, 'rotated_on_info': 30}
+BASE_POS = {'held_angle': 30, 'rotated_on_info': 30}
 
 PISTOLS = ('glock', 'usp', 'p2000', 'p250', 'five', 'tec', 'cz75', 'deagle', 'desert', 'revolver', 'r8', 'elite', 'dual')
 SMGS = ('mp9', 'mp7', 'mp5', 'mac', 'ump', 'p90', 'bizon')

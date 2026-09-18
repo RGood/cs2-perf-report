@@ -62,8 +62,8 @@ RULES = {
         "Keep dying next to someone, and make the fight last: the longer the killer's aim stays on you, the easier the trade."),
 }
 
-BASE_IMPACT = {'clutch_exit_kills': 25, 'clutch': 60, 'opening_kill': 50, 'retake_kill': 50, 'multi_kill': 45, 'flash_kill': 40, 'trade_kill': 42, 'good_anchor': 40,
-               'reposition_kill': 20, 'fight_support': 35, 'flash_assist': 32, **__import__('positioning').BASE_POS, **__import__('flags_extra').BASE_POS, 'util_damage': 30, 'survived_damage': 25, 'util_on_signal': 20, 'saved_rifle': 12, 'died_tradeable': 25}
+BASE_IMPACT = {'clutch_exit_kills': 18, 'clutch': 60, 'opening_kill': 50, 'retake_kill': 50, 'multi_kill': 45, 'flash_kill': 40, 'trade_kill': 36, 'good_anchor': 40,
+               'reposition_kill': 28, 'fight_support': 35, 'flash_assist': 32, **__import__('positioning').BASE_POS, **__import__('flags_extra').BASE_POS, 'util_damage': 30, 'survived_damage': 25, 'util_on_signal': 26, 'saved_rifle': 12, 'died_tradeable': 20}
 
 
 for _k in __import__('flags_extra').RETIRED:

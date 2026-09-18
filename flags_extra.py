@@ -64,7 +64,7 @@ RULES_NEG = {
     'wide_swing_alone': ("Wide swing alone", "You died at full speed, closing on your killer over the last second, with no teammate within 15 m to trade.", "Wide swings work with a trade partner or a flash. Alone, shoulder-peek for information instead."),
     'shot_in_back': ("Shot in the back", "At your death you were looking more than 100° away from your killer. The flank was not covered and nobody was watching it.", "Clear behind you before you commit forward, and ask a teammate to watch the flank you cannot."),
     'chased_and_died': ("Chased and died", "After a kill you pushed more than 15 m toward the remaining enemies within 5 s and died.", "After a kill, reset. The enemy knows where you are; let them come to you or re-peek with a teammate."),
-    'ran_into_contact': ("Ran into contact", "You were running (over 200 u/s) toward an enemy within 20 m whom nobody on your team had seen yet and who had not seen you in the last 8 s, and you lost the fight that followed. Running makes noise the enemy hears before you see them. A sighting in the last 8 s still counts as seen even if line of sight broke since; an older one does not.", "Walk the last 20 m into any position an enemy could hold. Sound is information you give away."),
+    'ran_into_contact': ("Ran into contact", "You were running (over 200 u/s) toward an enemy within 20 m whom nobody on your team had seen yet and who had not seen you in the last 8 s, and you lost the fight that followed. Running makes noise the enemy hears before you see them. A sighting in the last 8 s still counts as seen even if line of sight broke since; an older one does not. Rushes and executes are not counted: two or more teammates running with you within 15 m, or two or more of your team's grenades going off within 30 m of you in the last 6 s.", "Walk the last 20 m into any position an enemy could hold. Sound is information you give away."),
     'awp_line': ("Walked into an AWP line", "You died to a sniper from 30 m or more within 2 s of first becoming visible to them.", "Know the AWP lines on every map and cross them behind a smoke or after the shot."),
     'instant_death': ("Instant death", "You died within the first 10 s of the round.", "Nothing is gained in the first 10 s that is worth a player. Take the first fight with utility or a teammate."),
     'rotated_off_early': ("Rotated off site early", "As CT you moved more than 30 m from your starting spot before any enemy was within 40 m of it, and enemies then arrived where you had been within 15 s.", "Rotate on information, not on a hunch. If the site is quiet, it still needs someone on it."),
@@ -88,7 +88,7 @@ RULES_NEG = {
     'bomb_abandoned': ("Bomb abandoned", "You dropped the bomb and nobody picked it up for 15 s while you were alive and more than 10 m away from it.", "If you drop the bomb on purpose, call it. If it is dropped by accident, go back for it."),
     'planted_without_cover': ("Planted without cover", "You started the plant with a visible enemy within 25 m and no teammate within 15 m, and died during the plant.", "Clear or smoke the angle first, or plant where the enemy cannot see. A plant with an enemy watching is a death, not a plant."),
     'defuse_too_late': ("Defuse started too late", "You started the defuse with less time on the bomb than the defuse takes (10 s, 5 with a kit).", "Know the bomb time. If the defuse cannot finish, save the weapon and leave."),
-    'solo_retake': ("Solo retake", "As CT after the plant you came within 20 m of the bomb with no teammate within 15 m and died.", "Retake together. One player into a post-plant is a free kill and no defuse."),
+    'solo_retake': ("Solo retake", "As CT after the plant you came within 20 m of the bomb with no teammate within 15 m and died. Not counted when the solo retake was the right call or not a choice: you were the last alive against a single enemy; the last alive with less equipment to save than the loss bonus pays anyway; or you had gone in with a teammate who died in the last 8 s while you were already committed to the site. Counted, but lightly, when you were last alive with a gun worth saving against two or more.", "Retake together. One player into a post-plant is a free kill and no defuse."),
     'died_planting': ("Died while planting", "You were killed between starting and finishing the plant.", "Plant only when the angles are held or smoked. If an enemy is still watching the site, kill or smoke them first."),
     'clutch_lost_no_damage': ("Clutch lost without damage", "You were the last player alive, the round was lost, and you did no damage after your last teammate died.", "In a clutch, either find the one fight you can win or save the weapon. Doing neither gives the enemy the round and the gun."),
     'died_reloading': ("Died reloading", "You reloaded within 2.5 s of your death and did not fire again before it.", "Reload behind cover, and only when the enemy is not about to peek. In contact, switch to the pistol."),
@@ -141,16 +141,16 @@ RULES_POS = {
     'pistol_switch_won': ("Switched to pistol and won", "Your primary's clip ran out within 3 s before a kill you got with the pistol.", "Keep the pistol switch instead of the reload in a close fight."),
 }
 BASE_NEG = {'flash_reacted': 14, 'alive_at_timeout': 55, 'opener_untradeable': 42, 'lost_opener_t': 45, 'crosshair_off': 12, 'first_bullet_missed': 10, 'slow_to_damage': 14, 'shot_moving': 18, 'moving_scoped': 18, 'died_through_smoke': 16,
-            'died_to_jumper': 10, 'repeek': 36, 'wide_swing_alone': 34, 'shot_in_back': 30, 'chased_and_died': 34, 'ran_into_contact': 18, 'awp_line': 28, 'instant_death': 18, 'rotated_off_early': 34,
-            'frozen_on_site': 40, 'solo_rotation_lost': 42, 'missed_trade': 38, 'baited': 42, 'flashed_myself': 12, 'team_damage': 14, 'flash_blinded_nobody': 12, 'flash_no_swing': 10,
-            'molotov_on_nothing': 14, 'wasted_he': 12, 'smg_full_buy': 16, 'bought_vs_save': 25, 'saved_with_money': 22, 'no_kit': 14, 'no_helmet': 10, 'lost_full_buy_to_pistol': 20,
+            'died_to_jumper': 10, 'repeek': 36, 'wide_swing_alone': 34, 'shot_in_back': 30, 'chased_and_died': 34, 'ran_into_contact': 12, 'awp_line': 28, 'instant_death': 18, 'rotated_off_early': 34,
+            'frozen_on_site': 40, 'solo_rotation_lost': 42, 'missed_trade': 38, 'baited': 42, 'flashed_myself': 12, 'team_damage': 14, 'flash_blinded_nobody': 8, 'flash_no_swing': 6,
+            'molotov_on_nothing': 14, 'wasted_he': 12, 'smg_full_buy': 16, 'bought_vs_save': 25, 'saved_with_money': 22, 'no_kit': 8, 'no_helmet': 10, 'lost_full_buy_to_pistol': 20,
             'bomb_died_with_me': 45, 'bomb_abandoned': 34, 'planted_without_cover': 36, 'defuse_too_late': 18, 'solo_retake': 40, 'died_planting': 40, 'clutch_lost_no_damage': 35,
             'died_reloading': 32, 'reloaded_in_open': 28, 'reload_near_full': 10, 'died_empty_clip': 16, 'crouch_peek_rifle': 14, 'jumped_into_fight': 14}
-BASE_POS = {'flash_turned_kill': 28, 'watched_bomb': 35, 'held_plant_spot': 35, 'committed_defuse': 45, 'swung_own_flash': 25, 'flash_in_fight': 25, 'attacked_off_view': 12, 'fought_with_cover': 12, 'pistol_switch': 12,
-            'opener_traded': 25, 'pre_aimed': 8, 'prefired': 12, 'first_bullet_hit': 6, 'won_after_hit_first': 15, 'counter_strafed': 6, 'wallbang_kill': 15, 'kill_through_smoke': 15,
-            'noscope_kill': 10, 'unseen_kill': 12, 'kill_with_cover': 12, 'info_peek_survived': 10, 'caught_rotation': 35, 'post_plant_hold': 30, 'kill_down_a_man': 40, 'weapon_drop': 10,
+BASE_POS = {'flash_turned_kill': 28, 'watched_bomb': 35, 'held_plant_spot': 35, 'committed_defuse': 45, 'swung_own_flash': 25, 'flash_in_fight': 20, 'attacked_off_view': 14, 'fought_with_cover': 14, 'pistol_switch': 12,
+            'opener_traded': 25, 'pre_aimed': 12, 'prefired': 16, 'first_bullet_hit': 10, 'won_after_hit_first': 15, 'counter_strafed': 10, 'wallbang_kill': 15, 'kill_through_smoke': 15,
+            'noscope_kill': 10, 'unseen_kill': 12, 'kill_with_cover': 12, 'info_peek_survived': 14, 'caught_rotation': 35, 'post_plant_hold': 35, 'kill_down_a_man': 40, 'weapon_drop': 10,
             'stopped_defuse': 55, 'killed_planter': 45, 'molotov_retreat': 15, 'plant_smoke': 15, 'retake_smoke': 15, 'he_stack': 18, 'killed_full_buy_on_eco': 30, 'exit_frag': 25,
-            'picked_rifle_on_eco': 10, 'plant_under_pressure': 35, 'fast_plant': 10, 'defused_under_fire': 55, 'sneaky_defuse': 55, 'defuse_fake': 30, 'pistol_switch_won': 15}
+            'picked_rifle_on_eco': 10, 'plant_under_pressure': 40, 'fast_plant': 10, 'defused_under_fire': 55, 'sneaky_defuse': 55, 'defuse_fake': 30, 'pistol_switch_won': 15}
 
 
 RETIRED = {'clutch_lost_no_damage'} | set(['multi_kill', 'opening_kill', 'retake_kill', 'kill_down_a_man', 'killed_full_buy_on_eco', 'exit_frag', 'survived_damage', 'won_after_hit_first', 'wallbang_kill', 'kill_through_smoke', 'noscope_kill', 'caught_rotation', 'fast_plant', 'he_stack', 'util_damage', 'molotov_retreat', 'clutch', 'stopped_defuse', 'killed_planter', 'defused_under_fire', 'sneaky_defuse', 'flash_kill', 'flash_assist', 'unseen_kill', 'kill_with_cover', 'pistol_switch_won']) | set(['lost_opener_ct', 'lost_opener_t', 'instant_death', 'died_to_jumper', 'lost_full_buy_to_pistol', 'zero_impact_full_buy', 'died_planting', 'team_flash_death'])   # outcomes rather than decisions: no longer reported (kept in code for reference)
@@ -429,7 +429,16 @@ def negatives(D, me):
                 fo = g[(g['team_num'] != team) & (g['is_alive'] == True) & (g['spotted'] == False)]
                 near_f = [f for f in fo.itertuples() if dist_m((float(r.X), float(r.Y)), (float(f.X), float(f.Y))) < 20
                           and not ever_seen(str(f.steamid), me, ct) and not ever_seen(me, str(f.steamid), ct)]
-                if near_f: ran = (ct, near_f[0].name); break
+                if not near_f: continue
+                # a rush or an execute is meant to be loud: two or more teammates moving with you, or your team's utility going off around you
+                mypos_ = (float(r.X), float(r.Y))
+                movers = sum(1 for m_ in g[(g['team_num'] == team) & (g['is_alive'] == True) & (g['steamid'] != me)].itertuples()
+                             if dist_m(mypos_, (float(m_.X), float(m_.Y))) <= 15 and c.speed(ct, str(m_.steamid)) > 150)
+                dt_ = D['deton']; team_ids_ = mates | {me}
+                util_ = dt_[(dt_['steamid'].isin(team_ids_)) & (dt_['tick'] >= ct - 6 * TICK) & (dt_['tick'] <= ct + TICK)] if len(dt_) else dt_
+                util_near = sum(1 for u_ in util_.itertuples() if dist_m(mypos_, (float(u_.x), float(u_.y))) <= 30)
+                if movers >= 2 or util_near >= 2: continue
+                ran = (ct, near_f[0].name); break
             if ran and killer in foes:
                 out.append(c.base(rn, side, t, place, pos, kind='ran_into_contact', facts=base_facts + f" {(t - ran[0]) / TICK:.1f} s earlier you were running, unspotted, with {ran[1]} unspotted within 20 m.", **kw))
             # engagement shots: moving, first bullet, slow to damage, crosshair at first sight
@@ -534,7 +543,29 @@ def negatives(D, me):
                 if len(pl) and pl.iloc[-1]['user_X'] == pl.iloc[-1]['user_X']:
                     bpos = (float(pl.iloc[-1]['user_X']), float(pl.iloc[-1]['user_Y']))
                     if dist_m(pos, bpos) <= 20 and (nm is None or nm[0] > 15):
-                        out.append(c.base(rn, side, t, place, pos, kind='solo_retake', facts=base_facts + f" Post-plant, {dist_m(pos, bpos):.0f} m from the bomb, " + (f"nearest teammate {nm[0]:.0f} m away." if nm else "no teammate alive."), extra_pos=bpos, extra_label='bomb', **kw))
+                        # when the solo retake is the right call it is not flagged: last alive against one enemy (a fair 1v1), or last alive
+                        # with less equipment to save than the loss bonus pays anyway
+                        ma_, fo_ = c.alive_counts(t - 1, team)
+                        eq_ = int(mr['current_equip_value']) if mr is not None and mr['current_equip_value'] == mr['current_equip_value'] else 0
+                        streak_ = 0
+                        for r_ in range(rn - 1, -1, -1):
+                            tm_ = c.team(r_)
+                            if r_ in fz and tm_ is not None and D['winner'].get(r_) is not None and D['winner'].get(r_) != ('CT' if tm_ == 3 else 'T'): streak_ += 1
+                            else: break
+                        bonus_ = min(3400, 1400 + 500 * streak_)
+                        last_alive = (ma_ is not None and ma_ <= 1)
+                        # a two-man retake where the partner died first: if you were already committed (within 25 m of the bomb, or within
+                        # 15 m of the partner) when they died in the last 8 s, the solo part was not your decision
+                        committed_with = None
+                        for md_ in rd[(rd['user_team_num'] == team) & (rd['user_steamid'] != me) & (rd['tick'] < t) & (rd['tick'] >= t - 8 * TICK)].itertuples():
+                            if not (md_.user_X == md_.user_X): continue
+                            mdp = (float(md_.user_X), float(md_.user_Y)); me_then = c.row(int(md_.tick), me)
+                            if me_then is None or not (me_then.X == me_then.X): continue
+                            mp_then = (float(me_then.X), float(me_then.Y))
+                            if dist_m(mdp, bpos) <= 25 and (dist_m(mp_then, bpos) <= 25 or dist_m(mp_then, mdp) <= 15):
+                                committed_with = (str(md_.user_name), round((t - int(md_.tick)) / TICK, 1)); break
+                        if last_alive and (fo_ == 1 or eq_ < bonus_ or committed_with): pass
+                        else: out.append(c.base(rn, side, t, place, pos, kind='solo_retake', facts=base_facts + f" Post-plant, {dist_m(pos, bpos):.0f} m from the bomb, " + (f"nearest teammate {nm[0]:.0f} m away." if nm else "no teammate alive.") + (f" You were the last alive against {fo_} enemies with ${eq_} of equipment (the loss bonus was ${bonus_})." if last_alive else ""), last_alive=last_alive, foes_left=fo_, equip_kept=eq_, extra_pos=bpos, extra_label='bomb', **kw))
                 site_deaths = rd[(rd['tick'] < t) & (rd['user_team_num'] == team) & (rd['user_last_place_name'] == place)]
                 if place in ('BombsiteA', 'BombsiteB') and len(site_deaths) >= 2 and (nm is None or nm[0] > 20):
                     out.append(c.base(rn, side, t, place, pos, kind='solo_rotation_lost', facts=base_facts + f" {len(site_deaths)} teammates had already died at {place}; you entered alone" + (f", nearest teammate {nm[0]:.0f} m away." if nm else "."), **kw))
