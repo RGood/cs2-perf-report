@@ -6,12 +6,15 @@
 Actions: 'added', 'removed', 'modified', 'renamed_from', 'renamed_to'. Falls back to a 3 s poller when the OS call
 is unavailable (non-Windows), so callers get the same callback either way.
 """
+from __future__ import annotations
+from typing import Callable
+WatchCallback = Callable[[str, str], None]      # (action, file name); action is 'added', 'removed', 'modified', 'renamed_from' or 'renamed_to'
 import os, sys, threading, time
 
 ACTIONS = {1: 'added', 2: 'removed', 3: 'modified', 4: 'renamed_from', 5: 'renamed_to'}
 
 
-def _watch_windows(path, callback, stop_event):
+def _watch_windows(path: str, callback: WatchCallback, stop_event: threading.Event) -> None:
     import ctypes
     from ctypes import wintypes
     k32 = ctypes.windll.kernel32
@@ -44,8 +47,8 @@ def _watch_windows(path, callback, stop_event):
         k32.CloseHandle(h)
 
 
-def _watch_poll(path, callback, stop_event, interval=3):
-    def snap():
+def _watch_poll(path: str, callback: WatchCallback, stop_event: threading.Event, interval: float = 3) -> None:
+    def snap() -> dict[str, int]:
         try:
             return {f: os.path.getsize(os.path.join(path, f)) for f in os.listdir(path)}
         except OSError:
@@ -62,10 +65,10 @@ def _watch_poll(path, callback, stop_event, interval=3):
         prev = cur
 
 
-def watch(path, callback):
+def watch(path: str, callback: WatchCallback) -> Callable[[], None] | None:
     """Start watching `path`; returns a stop() function. Uses OS notifications on Windows, polling elsewhere."""
     stop_event = threading.Event()
-    def run():
+    def run() -> None:
         if sys.platform == 'win32':
             try:
                 _watch_windows(path, callback, stop_event); return
@@ -76,7 +79,7 @@ def watch(path, callback):
     return stop_event.set
 
 
-def settled(path, quiet=1.5, timeout=600):
+def settled(path: str, quiet: float = 1.5, timeout: float = 600) -> int | None:
     """Block until the file's size has been unchanged for `quiet` seconds (a finished write), or timeout. Returns final size or None."""
     t0 = time.time(); last = -1; since = time.time()
     while time.time() - t0 < timeout:

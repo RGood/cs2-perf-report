@@ -23,6 +23,10 @@ and a tab per player with their average impact per round; click a tab to switch.
 
 ## Install
 
+Nothing to do if you start it with `CS2 Report.bat` or `make_report.bat`: both run `ensure_deps.py` first, which checks
+`requirements.txt` against what is installed (no network, a fraction of a second) and runs pip only when a package is
+missing or older than the listed minimum. To do it by hand, or when running the `.py` files directly:
+
     pip install -r requirements.txt
 
 Python 3.12 on Windows is what this was built on. tkinter ships with Python.
@@ -64,9 +68,13 @@ FACEIT demos must be downloaded by you from the match room (login required). The
 | `app.py` | Desktop app: drop zone, queue, progress, opens the report |
 | `cs2report.py` | CLI runner: find demo, decompress, fetch radar, build |
 | `performance_report.py` | The page: team headers, player tabs, and per player a summary paragraph, average impact per round, round strip, chips, ranked lists, cards (SVG over a shared radar) |
-| `mistake_report.py` | Things-to-improve rules, severity, shared demo parser and radar drawing |
-| `impact_report.py` | Things-to-keep-doing rules and impact scoring |
-| `positioning.py` | Fight-on-their-terms and hold-value flags (crossfire, swung into a held angle, seen first, their range, empty site, absent from the hit; held the angle, rotated on info) |
+| `flags/` | Every flag, one Python file each, all with the same API (`KIND`, `SIDE`, `TITLE`, `WHY`, `DO`, `BASE`, `detect(c)`, optional `adjust(m, add)`). `flags/README.md` explains it; `flags/_template.py` is the starting point for a new flag; `_context.py` is what the flags share |
+| `constants.py` | Every constant more than one file uses (`TICK`, `M`, `CONT_GAP`, `SPRAY_RUN`, `SAFE_WINDOW` ...). Imports nothing, so anything can import it without a dependency loop |
+| `demolib.py` | Helpers over the parsed demo shared by the flags and the report modules (per-demo caches, grenade flights, teammate-fight analysis, the per-bullet inaccuracy table) |
+| `ensure_deps.py` | Run by both `.bat` launchers: installs what `requirements.txt` lists when a package is missing or too old |
+| `folder_watch.py` | Event-driven watching of the demo folders for the app |
+| `mistake_report.py` | The demo parser, radar drawing, and thin wrappers `detect` / `severity` over the mistake flags |
+| `impact_report.py` | Thin wrappers `detect` / `impact` over the play flags |
 | `app.py` startup | Self-check: recreates folders, rebuilds the byte-code cache, verifies imports and packages, shows a dialog if anything is wrong |
 | `maps/` | Radar PNGs (from the CS Demo Manager repo) and `offsets.json` (game overview offsets, 44 maps) |
 
@@ -95,8 +103,9 @@ Analysis rules worth knowing:
 
 See `flag-catalog.md` for the full list of candidate flags and how each is detected.
 
-Thresholds are named constants at the top of `mistake_report.py` (`CONT_GAP`, `SPRAY_RUN`, `SAFE_WINDOW`) and in
-`severity()` / `impact()`. To add a rule: a `RULES` entry, a block in `detect()`, and a base weight.
+Every flag is one file in `flags/`, with its thresholds as named constants at the top, its rule text, its base weight, its
+detector and its own score modifiers. To add a flag, copy `flags/_template.py` to `flags/<kind>.py`; nothing else needs editing
+(see `flags/README.md`). The shared scoring steps (round result, death context and its +10 cap) are in `flags/_score.py`.
 
 ## Player
 

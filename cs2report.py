@@ -21,6 +21,10 @@ What it does
      falls back to the demo's own position silhouette if it cannot).
   4. Runs performance_report.py (mistakes + impact in one page) and prints the counts and the output path.
 """
+from __future__ import annotations
+from typing import Any, Callable
+OnProgress = Callable[[float, float, float, str], None]      # (percent, seconds elapsed, seconds left, message)
+OnLine = Callable[[str], None]
 import sys, os, json, glob, argparse, subprocess, datetime, urllib.request
 for _s in (sys.stdout, sys.stderr):
     try: _s.reconfigure(encoding='utf-8', errors='replace')
@@ -35,7 +39,7 @@ SETTINGS = os.path.join(HERE, 'settings.json')
 DEFAULTS = dict(steam64='', name='', profile_url='', faceit_id=None)   # no player until one is entered
 
 
-def load_settings():
+def load_settings() -> dict[str, Any]:
     try:
         s = json.load(open(SETTINGS, encoding='utf-8'))
         return {**DEFAULTS, **s}
@@ -43,16 +47,16 @@ def load_settings():
         return dict(DEFAULTS)
 
 
-def save_settings(s):
+def save_settings(s: dict[str, Any]) -> None:
     json.dump(s, open(SETTINGS, 'w', encoding='utf-8'), indent=1)
 
 
-def clear_settings():
+def clear_settings() -> None:
     if os.path.exists(SETTINGS):
         os.remove(SETTINGS)
 
 
-def resolve_steam(text):
+def resolve_steam(text: str) -> tuple[str, str | None]:
     """Accepts a steamcommunity profile URL (vanity or /profiles/), a bare vanity name, or a 17-digit Steam64.
     Returns (steam64, persona name). Uses the public profile XML; no API key."""
     import re, xml.etree.ElementTree as ET
@@ -73,7 +77,7 @@ def resolve_steam(text):
     return sid, name
 
 
-def faceit_id_for(steam64):
+def faceit_id_for(steam64: str) -> str | None:
     """FACEIT player id for a Steam64, or None if the account is not on FACEIT."""
     req = urllib.request.Request(f'https://api.faceit.com/users/v1/users?game=cs2&game_id={steam64}', headers=UA)
     try:
@@ -88,7 +92,7 @@ def faceit_id_for(steam64):
 SHARE_DICT = "ABCDEFGHJKLMNOPQRSTUVWXYZabcdefhijkmnopqrstuvwxyz23456789"
 
 
-def decode_sharecode(code):
+def decode_sharecode(code: str) -> tuple[int, int, int]:
     """CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx -> (match_id, outcome_id, token). Same encoding the game uses."""
     import re
     s = re.sub(r'^CSGO-', '', code.strip()).replace('-', '')
@@ -102,17 +106,10 @@ def decode_sharecode(code):
     return match_id, outcome_id, token
 
 
-def local_demo_for(match_id, outcome_id, token):
-    d = cs2_replays_dir()
-    if not d: return None
-    p = os.path.join(d, f'match730_{match_id:021d}_{outcome_id:010d}_{token}.dem')
-    return p if os.path.exists(p) else None
-
-
-def _pb_fields(b):
+def _pb_fields(b: bytes) -> list[tuple[int, Any]]:
     """Minimal protobuf walker: list of (field, value) where value is an int (varint) or bytes (length-delimited / fixed)."""
-    i = 0; out = []
-    def varint(i):
+    i = 0; out: list[tuple[int, Any]] = []
+    def varint(i: int) -> tuple[int, int]:
         v = 0; s = 0
         while True:
             x = b[i]; i += 1; v |= (x & 0x7f) << s; s += 7
@@ -127,7 +124,7 @@ def _pb_fields(b):
     return out
 
 
-def premier_info(dem_path, steam64=None):
+def premier_info(dem_path: str, steam64: str | None = None) -> dict[str, Any]:
     """Read the game's <demo>.dem.info sidecar (CDataGCCStrike15_v2_MatchInfo): match time, final team scores, who won,
     and whether the given player won. Returns {} if the sidecar is missing."""
     p = dem_path + '.info'
@@ -154,25 +151,25 @@ def premier_info(dem_path, steam64=None):
         return {}
 
 
-def expected_premier_path(match_id, outcome_id, token):
+def expected_premier_path(match_id: int, outcome_id: int, token: int) -> str | None:
     d = cs2_replays_dir()
     return os.path.join(d, f'match730_{match_id:021d}_{outcome_id:010d}_{token}.dem') if d else None
 
 
-def cs2_download_command(code):
+def cs2_download_command(code: str) -> tuple[str, str]:
     """Console command that makes the game download a match demo by share code, and a steam:// URL that launches CS2 with it."""
     cmd = f'csgo_download_match {code.strip()}'
     return cmd, 'steam://run/730//+' + cmd.replace(' ', '%20')
 
 
-def launch_cs2_download(code):
+def launch_cs2_download(code: str) -> str:
     """Ask Steam to launch CS2 with the download command. If CS2 is already running, Steam does not pass the command; use the console then."""
     cmd, url = cs2_download_command(code)
     os.startfile(url)
     return cmd
 
 
-def cs2_replays_dir():
+def cs2_replays_dir() -> str | None:
     """The game's replays folder, found through Steam's library list. Premier demos downloaded in-game land here."""
     cands = []
     for base in (r'C:\Program Files (x86)\Steam', r'C:\Program Files\Steam'):
@@ -189,7 +186,7 @@ def cs2_replays_dir():
     return None
 
 
-def premier_demos():
+def premier_demos() -> list[dict[str, Any]]:
     """Premier / matchmaking demos saved by the game (match730_*.dem), newest first, with map from the demo header."""
     d = cs2_replays_dir()
     if not d:
@@ -208,17 +205,13 @@ def premier_demos():
     return out
 
 
-_S = load_settings()
-PLAYER = _S['steam64']
-MODE = 'both'
-FACEIT_PLAYER_ID = _S.get('faceit_id') or ''
 
 UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36',
       'Accept': 'application/json', 'Origin': 'https://www.faceit.com', 'Referer': 'https://www.faceit.com/'}
 RADAR_SRC = 'https://raw.githubusercontent.com/akiver/cs-demo-manager/main/static/images/maps/cs2/radars/{m}.png'
 
 
-def faceit_recent(n=20):
+def faceit_recent(n: int = 20) -> list[dict[str, Any]]:
     s = load_settings(); fid = s.get('faceit_id')
     if not s.get('steam64'):
         raise RuntimeError('no player set: enter your Steam profile first (app field, or: cs2report.py profile <url>)')
@@ -237,7 +230,7 @@ def faceit_recent(n=20):
     return out
 
 
-def ensure_radar(mapname):
+def ensure_radar(mapname: str) -> None:
     offs = json.load(open(os.path.join(MAPS, 'offsets.json'))) if os.path.exists(os.path.join(MAPS, 'offsets.json')) else {}
     if mapname not in offs:
         print(f'  no radar offsets for {mapname}; the report will use the demo silhouette instead')
@@ -257,13 +250,13 @@ def ensure_radar(mapname):
                 print(f'  could not fetch radar for {mapname} ({e}); using the demo silhouette')
 
 
-def decompress(src, dst):
+def decompress(src: str, dst: str) -> None:
     import zstandard
     with open(src, 'rb') as f, open(dst, 'wb') as o:
         zstandard.ZstdDecompressor().copy_stream(f, o)
 
 
-def map_of_demo(path):
+def map_of_demo(path: str) -> str:
     from demoparser2 import DemoParser
     return DemoParser(path).parse_header().get('map_name', 'unknown')
 
@@ -272,10 +265,10 @@ CRASH_CODES = {139, -11, 3221225477, -1073741819, 3221226505, -1073741571}   # s
 
 
 class ReportCrashed(Exception):
-    def __init__(self, code): super().__init__(str(code)); self.code = code
+    def __init__(self, code: int) -> None: super().__init__(str(code)); self.code = code
 
 
-def run_with_progress(cmd, on_progress=None, on_line=None, attempts=3):
+def run_with_progress(cmd: list[str], on_progress: OnProgress | None = None, on_line: OnLine | None = None, attempts: int = 3) -> list[str]:
     """Run the report script; if the process dies in a native crash (demoparser2 has a thread race on some demos) run it again."""
     for i in range(attempts):
         try:
@@ -287,7 +280,7 @@ def run_with_progress(cmd, on_progress=None, on_line=None, attempts=3):
             if on_line: on_line(msg)
 
 
-def _run_with_progress(cmd, on_progress=None, on_line=None):
+def _run_with_progress(cmd: list[str], on_progress: OnProgress | None = None, on_line: OnLine | None = None) -> list[str]:
     """Run the report script, forwarding PROGRESS lines to a callback (or drawing a text bar) and other lines to on_line/print."""
     # pythonw has no valid C-level stdout/stderr; a C library writing a warning to them fail-fasts the process (0xc0000409).
     # The report and its worker processes therefore always run under python.exe, hidden by CREATE_NO_WINDOW.
@@ -299,8 +292,8 @@ def _run_with_progress(cmd, on_progress=None, on_line=None):
                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     tail = []
     import threading, time as _t
-    state = {}; stop = threading.Event()
-    def ticker():
+    state: dict[str, Any] = {}; stop = threading.Event()
+    def ticker() -> None:
         # redraw the text bar every 0.3 s, advancing at the rate implied by the last estimate
         while not stop.is_set():
             _t.sleep(0.3)
@@ -339,7 +332,7 @@ def _run_with_progress(cmd, on_progress=None, on_line=None):
     return tail
 
 
-def run(target, player, out, keep):
+def run(target: str, player: str | None, out: str | None, keep: bool) -> str:
     # resolve to a .dem.zst or .dem path
     label = None
     if os.path.exists(target):
@@ -368,7 +361,7 @@ def run(target, player, out, keep):
     return out
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('target', help='latest | list | premier | download <share code> | profile <steam url> | <faceit match id> | <path to .dem or .dem.zst>')
     ap.add_argument('rest', nargs='*')

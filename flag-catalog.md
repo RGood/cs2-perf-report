@@ -1,6 +1,6 @@
 # Flag catalog: impact flags and how to detect them with demoparser2
 
-Sign: + positive impact, − negative. ✓ = implemented in the report (the extra flags live in flags_extra.py). Detection uses demoparser2 events
+Sign: + positive impact, − negative. ✓ = implemented in the report (each flag is one file in `flags/`, named after its id). Detection uses demoparser2 events
 (`player_death`, `player_hurt`, `weapon_fire`, `player_blind`, grenade detonations, bomb events, `weapon_reload`,
 `player_footstep`) and tick props (`X/Y/Z`, `yaw/pitch`, `velocity`, `is_walking`, `ducking`, `is_scoped`, `spotted`,
 `approximate_spotted_by`, `flash_duration`, `inventory`, `clip`, `balance`, `cash_spent_this_round`, `current_equip_value`,
@@ -43,7 +43,7 @@ Not built, on purpose: any single "low-value position" flag. Position value need
 | Died without firing | − | 0 shots in the engagement | Not a flag: the engagement text on death cards states the shot count instead |
 | Long-distance spray missed ✓ | − | Continuous run ≥ 7 shots at cycle rate, ≥ 20 m, ≤ 20 dmg to killer | |
 | Bursts missed at range ✓ | − | ≥ 6 shots as bursts/taps, ≥ 20 m, ≤ 20 dmg | |
-| Shot while moving ✓ | − | `weapon_fire` ticks where `velocity` magnitude > ~35 u/s for rifles (> ~60 for SMGs), share of engagement shots | Counter-strafing; thresholds per weapon class |
+| Shot while moving ✓ | − | From the `fire_bullets` event (the game's own `inaccuracy` + `spread` per bullet): a shot counts when I was moving (> 60 u/s from positions), the cone at the aimed enemy's distance was wider than a 0.3 m radius, and it was ≥ 2× that weapon's standing cone at the same point of a spray in this demo; more than half of the engagement shots | Running with a Glock or SMG up close stays tight and is not counted |
 | Counter-strafed engagement ✓ | + | ≥ 85% of engagement shots fired with velocity under the threshold | |
 | Moving scoped shot ✓ | − | `weapon_fire` with `is_scoped` and velocity > 30 u/s on awp/ssg08 | |
 | Wallbang kill (retired: an outcome, not a decision) | + | `player_death.penetrated > 0`, attacker = me | |
@@ -72,7 +72,7 @@ Not built, on purpose: any single "low-value position" flag. Position value need
 | Chased and died ✓ | − | After a kill I advance > 15 m toward remaining enemies within 5 s and die | |
 | Traded by enemy ✓ | − | Died within 5 s of my kill, within 8 m of where I got it | |
 | Repositioned after a kill ✓ | + | Second kill ≥ 8 m from the first in the same round | |
-| Ran into contact ✓ | − | ≥ 3 `player_footstep` events by me while not visible with an unspotted enemy ≤ 20 m, then I lose the fight | Running gave the position away |
+| Ran into contact ✓ | − | Running (> 200 u/s from positions; the demo has no usable footsteps) while unspotted with an unseen enemy ≤ 20 m (no sighting either way in the last 8 s), then I lose the fight. Exempt: a rush (≥ 2 teammates running within 25 m of me at some point in the prior 3 s) or an execute (≥ 2 team grenades within 30 m in the last 6 s) | Running gave the position away |
 | Walked into an AWP line ✓ | − | Died to awp/ssg08 at ≥ 30 m within 2 s of first becoming visible to the killer | |
 | Instant death (retired: an outcome, not a decision) | − | Died before 10 s of round time | |
 | Early solo T contact ✓ | − | T death < 20 s, nearest teammate > 10 m, 0 damage | |
@@ -160,10 +160,10 @@ Not built, on purpose: any single "low-value position" flag. Position value need
 | Died reloading ✓ | − | `weapon_reload` by me within 2.5 s before death with no `weapon_fire` after it | |
 | Reloaded in the open ✓ | − | `weapon_reload` while visible with an enemy alive within 25 m, then died within 3 s | |
 | Reloaded with a near-full clip in contact ✓ | − | `weapon_reload` with `clip` ≥ 80% of max while an enemy is within 25 m | Habit reload |
-| Died with an empty clip ✓ | − | `clip == 0` at death and a `weapon_fire` in the last 2 s | Sprayed dry |
+| Died with an empty clip ✓ | − | `active_weapon_ammo == 0` at the last tick alive (one tick before the death; at the death tick the weapon is already gone) and a `weapon_fire` in the last 2 s | Sprayed dry |
 | Switched to pistol and won → Switched to pistol when dry ✓ | + | Kill with a pistol within 3 s of my primary's clip hitting 0 | |
 | Crouch-peeked into a rifle ✓ | − | `ducking` true at death, killer ≥ 15 m, I was visible ≥ 1 s | Crouching in the open |
-| Jumped into a fight ✓ | − | `is_airborne` at death or at my last shots, killer within 15 m | |
+| Jumped into a fight ✓ | − | `is_airborne` at the last tick alive, killer within 15 m. Never read at the death tick: the demo marks about half of all dead players airborne for that one tick | A drop off a ledge counts too |
 
 ## Source basis
 

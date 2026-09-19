@@ -6,6 +6,9 @@ Cards are drawn as a shared radar background plus a small inline SVG overlay, so
 Usage:
     python performance_report.py <demo.dem> [--player 76561198063294402] [--out report.html]
 """
+from __future__ import annotations
+from typing import Any
+from report_types import Card, Demo, Proj, Rules, XY
 import sys, os, re, argparse, html, json, time, math, pickle, tempfile, collections as C
 import concurrent.futures as CF
 for _s in (sys.stdout, sys.stderr):
@@ -13,13 +16,13 @@ for _s in (sys.stdout, sys.stderr):
     except Exception: pass
 import mistake_report as MR
 import impact_report as IR
-from mistake_report import parse, make_map, b64, for_player, nade_flight, NADE_RADIUS
+from mistake_report import parse, make_map, b64, for_player, nade_flight
 
 _T0 = time.time(); _EXPECTED = None
 TIMINGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'timings.json')
 
 
-def progress(pct, msg):
+def progress(pct: float, msg: str) -> None:
     """Print a machine-readable progress line: PROGRESS <pct> <elapsed_s> <eta_s> <message>."""
     el = time.time() - _T0
     prop = el / pct * (100 - pct) if pct > 0 else 0
@@ -27,7 +30,7 @@ def progress(pct, msg):
     print(f"PROGRESS {int(pct)} {el:.0f} {max(0, eta):.0f} {msg}", flush=True)
 
 
-def expected_seconds(rounds, mb):
+def expected_seconds(rounds: int, mb: float) -> float:
     """Estimate total build time from previous runs (seconds per round), falling back to a rule of thumb."""
     try:
         hist = json.load(open(TIMINGS))
@@ -37,7 +40,7 @@ def expected_seconds(rounds, mb):
         return 1.6 * rounds + 0.03 * mb
 
 
-def remember_timing(rounds, mb, seconds):
+def remember_timing(rounds: int, mb: float, seconds: float) -> None:
     try:
         hist = json.load(open(TIMINGS)) if os.path.exists(TIMINGS) else []
     except Exception:
@@ -266,42 +269,27 @@ window.addEventListener('DOMContentLoaded',function(){
 """
 
 
-def css_for(v):
+def css_for(v: float) -> str:
     return MR.sev_css(-v) if v < 0 else IR.imp_css(v)
 
 
-def esc(s):
+def esc(s: Any) -> str:
     return html.escape(str(s if s is not None else ''))
 
 
-# ----------------------------------------------------------------------------- SVG cards
-ENEMY_SEEN = '#ffd070'   # enemy marker when the focus player had them in view
 ME_COL = '#e05cff'       # the selected player, the same on every card whatever the flag
-NADE_COL = {'flashbang': '#faf078', 'smokegrenade': '#c8c8c8', 'hegrenade': '#f08c3c', 'molotov': '#ff5a1e', 'incgrenade': '#ff5a1e'}
 
 
-def trail(pts, rgb, width=3):
-    out = []
-    n = len(pts)
-    for i in range(1, n):
-        f = 0.25 + 0.75 * i / n
-        (x1, y1), (x2, y2) = pts[i - 1], pts[i]
-        out.append(f"<line x1='{x1}' y1='{y1}' x2='{x2}' y2='{y2}' stroke='rgb{rgb}' stroke-opacity='{f:.2f}' stroke-width='{width}'/>")
-    if pts:
-        out.append(f"<circle cx='{pts[0][0]}' cy='{pts[0][1]}' r='3' fill='none' stroke='rgb{rgb}'/>")
-    return ''.join(out)
-
-
-def arrow(x, y, yaw, col, L=14, W=4, opacity=1.0):
+def arrow(x: float, y: float, yaw: float, col: str, L: float = 14, W: float = 4, opacity: float = 1.0) -> str:
     """Facing marker: a small triangle in front of a player's dot, pointing along their view yaw (radar y points down)."""
     ux, uy = math.cos(math.radians(yaw)), -math.sin(math.radians(yaw))
     tx, ty = x + ux * L, y + uy * L; bx, by = x + ux * (L - 8), y + uy * (L - 8); px, py = -uy * W, ux * W
     return f"<polygon points='{tx:.1f},{ty:.1f} {bx+px:.1f},{by+py:.1f} {bx-px:.1f},{by-py:.1f}' fill='{col}' fill-opacity='{opacity}'/>"
 
 
-def svg_card(m, proj, title, colour, positive):
+def svg_card(m: Card, proj: Proj, title: str, colour: tuple[int, ...], positive: bool) -> str:
     """Overlay for one moment. m may carry lists: opponents=[(name,(x,y))], extras=[((x,y),label)]. Coordinates in the 900x900 radar frame."""
-    def P(p):
+    def P(p: XY) -> XY:
         x, y = proj(*p); return (round(x, 1), round(y, 1))
     s = ["<svg viewBox='0 0 900 900' xmlns='http://www.w3.org/2000/svg' font-family='Segoe UI,Arial' font-size='12'><g class='st'>"]
     # no static annotations on the map: everything a card shows comes from the replay frame, and the facts text carries the details
@@ -315,7 +303,8 @@ def svg_card(m, proj, title, colour, positive):
 
 
 # ----------------------------------------------------------------------------- per-player body
-def summary(name, mapname, rounds, wins, losses, net, pos, neg, mistakes, plays, cat, allrules, by_round):
+def summary(name: str, mapname: str, rounds: list[tuple[int, str, bool | None]], wins: int, losses: int, net: int, pos: int, neg: int, mistakes: list[Card], plays: list[Card],
+            cat: dict[tuple[str, str], list[int]], allrules: dict[tuple[str, str], tuple[str, str, str]], by_round: dict[int, list[int]]) -> str:
     n = max(len(rounds), 1); avg = net / n
     side_net = {'CT': 0, 'T': 0}; side_n = {'CT': 0, 'T': 0}
     for rn, side, won in rounds:
@@ -323,9 +312,9 @@ def summary(name, mapname, rounds, wins, losses, net, pos, neg, mistakes, plays,
     pos_cats = sorted([k for k in cat if k[0] == 'p'], key=lambda k: -sum(cat[k]))[:2]
     neg_cats = sorted([k for k in cat if k[0] == 'm'], key=lambda k: sum(cat[k]))[:2]
     rnet = {rn: sum(by_round.get(rn, [])) for rn, _, _ in rounds}
-    best = max(rnet, key=rnet.get) if rnet else None; worst = min(rnet, key=rnet.get) if rnet else None
+    best = max(rnet, key=lambda r: rnet[r]) if rnet else None; worst = min(rnet, key=lambda r: rnet[r]) if rnet else None
     quiet = sum(1 for v in rnet.values() if v == 0)
-    def catstr(k): return f"{allrules[k][0].lower()} ({len(cat[k])}, {sum(cat[k]):+d})"
+    def catstr(k: tuple[str, str]) -> str: return f"{allrules[k][0].lower()} ({len(cat[k])}, {sum(cat[k]):+d})"
     verdict = ('a strongly positive game' if avg >= 15 else 'a positive game' if avg >= 5 else 'a roughly neutral game' if avg > -5 else 'a negative game' if avg > -15 else 'a strongly negative game')
     s = [f"{name} finished {wins}-{losses} on {mapname} with an average impact of {avg:+.1f} per round, {verdict}: {len(plays)} plays worth {pos:+d} against {len(mistakes)} mistakes worth {neg:+d}."]
     if pos_cats: s.append("The positive side was driven by " + " and ".join(catstr(k) for k in pos_cats) + ".")
@@ -339,18 +328,18 @@ def summary(name, mapname, rounds, wins, losses, net, pos, neg, mistakes, plays,
     return ' '.join(s)
 
 
-def ranked(items, rules, title, positive):
-    grouped = {}
+def ranked(items: list[Card], rules: Rules, title: str, positive: bool) -> str:
+    grouped: dict[Any, dict[str, Any]] = {}
     for m in items:
         g = grouped.setdefault((m['round'], m['time']), dict(v=0, m=m, kinds=[])); g['v'] += m['impact']; g['kinds'].append(rules[m['kind']][0])
     top = sorted(grouped.values(), key=lambda g: -g['v'] if positive else g['v'])[:6]
     return f"<div class='box'><b>{title}</b><ol>" + ''.join(f"<li><span style='color:{css_for(g['v'])};font-weight:700'>{g['v']:+d}</span> &nbsp; R{g['m']['round']} {g['m']['side']} {g['m']['time']}s{(' at ' + esc(g['m']['place'])) if g['m'].get('place') else ''}: {esc('; '.join(g['kinds']))}</li>" for g in top) + "</ol></div>"
 
 
-def merge_moment(flags):
+def merge_moment(flags: list[Card]) -> Card:
     """One drawable dict for all flags that happened at the same moment."""
     base = dict(flags[0])
-    opps = []; extras = []; nades = []
+    opps: list[Any] = []; extras: list[Any] = []; nades: list[Any] = []
     for f in flags:
         cands = list(f.get('opponents') or [])
         o = f.get('vpos') or f.get('kpos'); n = f.get('victim') or f.get('killer')
@@ -366,7 +355,7 @@ def merge_moment(flags):
     return base
 
 
-def player_body(pid, E, mistakes, plays, proj, zthr, name):
+def player_body(pid: str, E: Demo, mistakes: list[Card], plays: list[Card], proj: Proj, zthr: float | None, name: str) -> tuple[str, dict[str, Any]]:
     for m in mistakes:
         sev, br = MR.severity(m); m['severity'] = sev; m['impact'] = -sev; m['imp_breakdown'] = br + [f"= severity {sev}, counted as impact {-sev:+d}"]; m['side_kind'] = 'm'
     for m in plays:
@@ -396,7 +385,7 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
     # moment its replay should run so a grenade thrown at it is seen going off
     an = E['all_nades']; mine_n = an[an['user_steamid'] == E['me']]
     TAIL = {'flashbang': 1.0, 'hegrenade': 1.0, 'smokegrenade': 3.0, 'molotov': 4.0, 'decoy': 1.0}
-    def flights_post(fl, tk):
+    def flights_post(fl: list[Card], tk: int | None) -> tuple[list[Any], float]:
         merged0 = merge_moment(fl); flights = []
         for w, q in merged0.get('nades_thrown') or []:
             cand = mine_n[(mine_n['user_X'] == q[0]) & (mine_n['user_Y'] == q[1])]
@@ -410,13 +399,13 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
             for w, _path, _end, thr, det in flights:
                 if tk - 12 * 64 <= thr <= tk + 64 and det > tk: post = max(post, (det - tk) / 64 + TAIL.get(w, 1.0))
         return flights, min(max(post, 0.5), 8.0)
-    info = {}
+    info: dict[Any, dict[str, Any]] = {}
     for k in keys:
         rn0 = k[0] - 1; tk = int(fz[rn0] + (k[1] or 0) * 64) if rn0 in fz else None
         flights, post = flights_post(moments[k], tk)
         info[k] = dict(tk=tk, flights=flights, post=post, end=(tk + int(post * 64)) if tk is not None else None)
     # moments in the same round whose replay windows overlap share one card, whatever mix of plays and mistakes they are
-    clusters = []
+    clusters: list[Any] = []
     for k in keys:
         if clusters:
             prev = clusters[-1]; ends = [info[x]['end'] for x in prev if info[x]['end'] is not None]
@@ -426,11 +415,11 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
     mid = {}
     for i, ks in enumerate(clusters):
         for k in ks: mid[k] = f"{pid}-m{i}"
-    first_of_kind = {}
+    first_of_kind: dict[Any, Any] = {}
     for k in keys:
         for f in moments[k]:
             first_of_kind.setdefault((f['side_kind'], f['kind']), mid[k])
-    def title_of(f): return allrules[(f['side_kind'], f['kind'])][0]
+    def title_of(f: Card) -> str: return allrules[(f['side_kind'], f['kind'])][0]
 
     h = [f"<div class='player' id='{pid}' hidden>",
          f"<p class='summary'>{esc(summary(name, E['map'], rounds, wins, losses, net, pos, neg, mistakes, plays, cat, allrules, by_round))}</p>",
@@ -439,7 +428,7 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
          f"<div class='box' style='border-left:8px solid {IR.imp_css(70)}'><small>Things to keep doing</small><div class='mid'>{len(plays)}</div><small>impact {pos:+d}, average {round(pos / len(plays)) if plays else 0:+d}</small></div>",
          f"<div class='box' style='border-left:8px solid {MR.sev_css(70)}'><small>Things to improve</small><div class='mid'>{len(mistakes)}</div><small>impact {neg:+d}, average {round(neg / len(mistakes)) if mistakes else 0:+d}</small></div>",
          "</div><div class='box'><b>Round by round</b> <small>net impact per round; green dots = plays, red dots = mistakes; click a round to jump to it</small><div class='strip'>"]
-    round_anchor = {}
+    round_anchor: dict[int, str] = {}
     for k in keys:
         round_anchor.setdefault(k[0], mid[k])
     for rn, side, won in rounds:
@@ -454,7 +443,7 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
     for k in keys:
         for f in moments[k]:
             inst[(f['side_kind'], f['kind'])].append((k, f))
-    lists = []
+    lists: list[str] = []
     for key in cat_order:
         vals = cat[key]; t = sum(vals); a = round(t / len(vals)); lid = f"{pid}-list-{key[0]}-{key[1]}"
         h.append(f"<a class='chip side-{key[0]}' href='#' onclick=\"return toggleList('{lid}', this)\" style='border-left:6px solid {css_for(a)}'><b>{len(vals)}</b>{esc(allrules[key][0])}<br><small>impact <span class='v' style='color:{css_for(t)}'>{t:+d}</span> &middot; avg {a:+d} &middot; {len(vals)} instance{'s' if len(vals) != 1 else ''}</small></a>")
@@ -467,7 +456,7 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
         h.append(f"<div class='chipl side-{key[0]}' id='{lid}'><div class='lh'><b>{esc(allrules[key][0])}</b> &middot; {len(vals)} instance{'s' if len(vals) != 1 else ''}, in round order &middot; click one to open its card <a href='#{pid}-guide-{key[0]}-{key[1]}' class='g'>what to do</a></div>{''.join(rows)}</div>")
     h.append("</div>")
     # ranked lists link to moments
-    def ranked_m(positive, title):
+    def ranked_m(positive: bool, title: str) -> str:
         items = sorted(keys, key=lambda k: (-sum(f['impact'] for f in moments[k]) if positive else sum(f['impact'] for f in moments[k])))
         items = [k for k in items if (sum(f['impact'] for f in moments[k]) > 0) == positive][:6]
         return f"<div class='box side-{'p' if positive else 'm'}'><b>{title}</b><ol>" + ''.join(f"<li><a href='#{mid[k]}' style='color:inherit;text-decoration:none'><span style='color:{css_for(sum(f['impact'] for f in moments[k]))};font-weight:700'>{sum(f['impact'] for f in moments[k]):+d}</span> &nbsp; R{k[0]} {moments[k][0]['side']} {k[1]}s{(' at ' + esc(moments[k][0]['place'])) if moments[k][0].get('place') else ''}: {esc('; '.join(title_of(f) for f in moments[k]))}</a></li>" for k in items) + "</ol></div>"
@@ -486,11 +475,11 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
         marks = [round((info[kk]['tk'] - tk) / 64, 2) for kk in ks if info[kk]['tk'] is not None and tk is not None]
         my_team = int(snap[(snap['tick'] == fz[rn0]) & (snap['steamid'] == E['me'])].iloc[0]['team_num']) if (rn0 in fz and ((snap['tick'] == fz[rn0]) & (snap['steamid'] == E['me'])).any()) else None
         dth = E['deaths']
-        def sees_me(v):
+        def sees_me(v: Any) -> bool:
             try: return E['me'] in set(str(x) for x in v)
             except TypeError: return False
         # replay: every player's last 12 s at 0.25 s steps plus every shot, in radar coordinates, for the in-page player
-        rp = dict(t0=-12.0, end=round(post, 2), rt=round(k[1] or 0, 1), mc=ME_COL, p=[], sh=[], marks=marks)
+        rp: dict[str, Any] = dict(t0=-12.0, end=round(post, 2), rt=round(k[1] or 0, 1), mc=ME_COL, p=[], sh=[], marks=marks)
         if tk is not None:
             dwin = dth[(dth['tick'] >= tk - 12 * 64) & (dth['tick'] <= tke + 8)]
             dead_at = {str(r.user_steamid): (int(r.tick), (float(r.user_X), float(r.user_Y))) for r in dwin.itertuples() if r.user_X == r.user_X and r.user_Y == r.user_Y}
@@ -592,10 +581,10 @@ def player_body(pid, E, mistakes, plays, proj, zthr, name):
 
 
 # ----------------------------------------------------------------------------- page
-_OCC = {}
+_OCC: dict[str, Any] = {}
 
 
-def set_occluder(bases, D, proj, zthr):
+def set_occluder(bases: dict[str, Any], D: Demo, proj: Proj, zthr: float | None) -> None:
     """Walkable-pixel masks from the radar images, used to stop a missed shot at the first wall. The threshold is taken from
     the radar brightness under real player positions in this demo (2nd percentile, scaled), so it adapts to each map's palette."""
     import numpy as np
@@ -614,7 +603,7 @@ def set_occluder(bases, D, proj, zthr):
     _OCC.clear(); _OCC.update(masks); _OCC['zthr'] = zthr
 
 
-def ray_end(x0, y0, yaw_deg, z, max_px):
+def ray_end(x0: float, y0: float, yaw_deg: float, z: float | None, max_px: float) -> XY | None:
     """Radar point where a ray from (x0, y0) in the aim direction first leaves the walkable area (approximate: the radar has no height)."""
     import numpy as np
     mask = _OCC.get('lower') if (z is not None and z == z and _OCC.get('zthr') is not None and z < _OCC['zthr'] and _OCC.get('lower') is not None) else _OCC.get('upper')
@@ -634,10 +623,10 @@ def ray_end(x0, y0, yaw_deg, z, max_px):
     return (round(x0 + stop * ux, 1), round(y0 + stop * uy, 1))
 
 
-_W = {}
+_W: dict[str, Any] = {}
 
 
-def _worker_init(pickle_path):
+def _worker_init(pickle_path: str) -> None:
     with open(pickle_path, 'rb') as f: D = pickle.load(f)
     bases, proj, zthr = make_map(D)
     if bases['lower'] is None: zthr = None
@@ -646,7 +635,7 @@ def _worker_init(pickle_path):
     MR.PROGRESS = lambda *a, **k: None
 
 
-def _analyse(tn, sid, name):
+def _analyse(tn: int, sid: str, name: str) -> tuple[str, str, dict[str, Any]]:
     D = _W['D']; E = for_player(D, sid)
     mistakes = MR.detect(E); plays = IR.detect(E)
     pid = f"p{sid[-6:]}"
@@ -654,18 +643,18 @@ def _analyse(tn, sid, name):
     return sid, body, dict(st, pid=pid, name=name, team=tn)
 
 
-def worker_count(n_players):
+def worker_count(n_players: int) -> int:
     """Processes for the per-player analysis: CS2REPORT_WORKERS overrides (1 = sequential), else one per player up to the core count."""
     env = os.environ.get('CS2REPORT_WORKERS')
     if env and env.strip().isdigit(): return max(1, min(int(env), n_players))
     return max(1, min(n_players, os.cpu_count() or 1))
 
 
-def round_replay(D, rn, proj):
+def round_replay(D: Demo, rn: int, proj: Proj) -> tuple[dict[str, Any], list[Any], float | None]:
     """Replay data for a whole round: freeze end (t = 0) to the round end plus 3 s. Same format as the card replays."""
     snap = D['snap']; fz = D['fz']; ft = int(fz[rn]); end = int(D.get('round_end', {}).get(rn, fz.get(rn + 1, int(snap['tick'].max())))) + 3 * 64
     T = lambda tick: round((int(tick) - ft) / 64, 2)
-    rp = dict(t0=0.0, end=T(end), rt=0.0, mc='#e05cff', p=[], sh=[], marks=[], g=[], fx=[])
+    rp: dict[str, Any] = dict(t0=0.0, end=T(end), rt=0.0, mc='#e05cff', p=[], sh=[], marks=[], g=[], fx=[])
     win = snap[(snap['tick'] >= ft) & (snap['tick'] <= end) & (snap['is_alive'] == True)]
     dth = D['deaths']; dwin = dth[(dth['tick'] >= ft) & (dth['tick'] <= end + 8) & dth['user_X'].notna()]
     dead_at = {str(r.user_steamid): (int(r.tick), (float(r.user_X), float(r.user_Y))) for r in dwin.itertuples()}
@@ -721,7 +710,7 @@ def round_replay(D, rn, proj):
     return rp, feed, (T(pl.iloc[0]['tick']) if len(pl) else None)
 
 
-def build(D, out_path, demo_name, focus=None):
+def build(D: Demo, out_path: str, demo_name: str, focus: str | None = None) -> tuple[dict[str, dict[str, Any]], dict[int, int]]:
     bases, proj, zthr = make_map(D)
     im = bases['upper'].convert('RGB'); w, h = im.size
     corners = [im.getpixel((x, y)) for x in (2, w - 3) for y in (2, h - 3)]
@@ -734,7 +723,7 @@ def build(D, out_path, demo_name, focus=None):
     set_occluder(bases, D, proj, zthr)
     snap = D['snap']; fz = D['fz']; first = min(fz.values())
     roster = snap[snap['tick'] == first][['steamid', 'name', 'team_num']].drop_duplicates('steamid')
-    teams = {2: [], 3: []}
+    teams: dict[int, list[Any]] = {2: [], 3: []}
     for r in roster.itertuples():
         if r.team_num == r.team_num and int(r.team_num) in teams: teams[int(r.team_num)].append((str(r.steamid), str(r.name)))   # NaN = not on a team at the first freeze
     team_wins = {}
@@ -790,7 +779,7 @@ def build(D, out_path, demo_name, focus=None):
             pid = f"p{sid[-6:]}"
             body, st = player_body(pid, E, mistakes, plays, proj, zthr, name)
             bodies[sid] = body; stats[sid] = dict(st, pid=pid, name=name, team=tn)
-    winner_tn = max(team_wins, key=team_wins.get) if team_wins[2] != team_wins[3] else None
+    winner_tn = max(team_wins, key=lambda tn: team_wins[tn]) if team_wins[2] != team_wins[3] else None
     h = [f"<!doctype html><html><head><meta charset='utf-8'><title>Performance report {D['map']}</title><style>{CSS}{bg_css}</style><script>{JS}</script></head><body>",
          f"<h1>Performance report: {D['map']}</h1><small>{esc(demo_name)}. {len(fz)} rounds. One metric, impact: good plays positive, mistakes negative, every number shows its arithmetic. Pick a player.</small>",
                   "<div class='showsel viewsel'><label><input type='radio' name='view' value='players' checked onchange='setView(this.value)'><span><b>Players</b><small>one player's flags, cards and replays</small></span></label>"
@@ -839,7 +828,7 @@ def build(D, out_path, demo_name, focus=None):
     return stats, team_wins
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(); ap.add_argument('demo'); ap.add_argument('--player', default=''); ap.add_argument('--out', default=None)
     a = ap.parse_args()
     out = a.out or os.path.splitext(os.path.basename(a.demo))[0] + '_performance.html'

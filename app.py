@@ -6,7 +6,9 @@ No AI involved: everything is the deterministic pipeline in this folder.
 
 Run:  pythonw app.py   (or double-click "CS2 Report.bat" in this folder)
 """
-import os, sys, time, threading, queue, traceback, webbrowser, datetime, zipfile, gzip, bz2, shutil, subprocess
+from __future__ import annotations
+from typing import Any, Callable, Iterable
+import os, sys, time, threading, queue, traceback, webbrowser, datetime, zipfile, gzip, bz2, shutil
 import tkinter as tk
 from tkinter import ttk, filedialog
 
@@ -23,7 +25,7 @@ except Exception:
 ACCEPT = ('.zst', '.gz', '.bz2', '.zip', '.dem')
 
 
-def decompress(src, workdir):
+def decompress(src: str, workdir: str) -> tuple[str, bool]:
     """Return path to a .dem for the given input (decompressing into workdir if needed) and whether it is temporary."""
     low = src.lower()
     if low.endswith('.dem'):
@@ -57,7 +59,7 @@ def decompress(src, workdir):
     raise ValueError(f'unsupported file type: {base}')
 
 
-def build_report(src, log, on_progress=None):
+def build_report(src: str, log: Callable[[str], None], on_progress: Callable[[float, float, float, str], None] | None = None) -> str:
     """Decompress, generate, return the report path."""
     import cs2report
     workdir = os.path.join(HERE, 'tmp'); os.makedirs(workdir, exist_ok=True)
@@ -86,7 +88,7 @@ def build_report(src, log, on_progress=None):
             except OSError: pass
 
 
-def _different_demo(out, dem):
+def _different_demo(out: str, dem: str) -> bool:
     """True if an existing report was built from a different demo file (by name in the page header)."""
     try:
         with open(out, encoding='utf-8') as f:
@@ -98,7 +100,7 @@ def _different_demo(out, dem):
 
 
 
-def self_check():
+def self_check() -> tuple[list[str], list[str]]:
     """Repair and verify the install on startup: folders, byte-code cache, module imports, packages, map data."""
     import importlib, compileall
     problems = []; notes = []
@@ -114,7 +116,7 @@ def self_check():
             importlib.import_module(pkg)
         except Exception as e:
             problems.append(f'missing package {pkg} ({e.__class__.__name__}). Run: pip install -r requirements.txt')
-    for mod in ('cs2report', 'mistake_report', 'impact_report', 'positioning', 'performance_report'):
+    for mod in ('cs2report', 'demolib', 'flags', 'mistake_report', 'impact_report', 'performance_report'):
         try:
             importlib.import_module(mod)
         except Exception as e:
@@ -129,7 +131,7 @@ def self_check():
 
 
 class App:
-    def __init__(self):
+    def __init__(self) -> None:
         self.root = TkinterDnD.Tk() if HAVE_DND else tk.Tk()
         self.root.title('CS2 Performance Report')
         self.root.geometry('900x640')
@@ -214,7 +216,7 @@ class App:
         self.root.after(300, self.refresh_matches)
         self.root.after(100, self.pump)
 
-    def startup_check(self):
+    def startup_check(self) -> None:
         problems, notes = self_check()
         if notes: self.write('Startup check: ' + ', '.join(notes) + '.')
         for p in problems: self.write('PROBLEM: ' + p)
@@ -223,10 +225,10 @@ class App:
             self.root.after(0, lambda: messagebox.showwarning('CS2 Performance Report', 'Startup found problems:\n\n' + '\n'.join(problems)))
 
     # ---- UI helpers
-    def write(self, msg):
+    def write(self, msg: str) -> None:
         self.q.put(msg)
 
-    def pump(self):
+    def pump(self) -> None:
         try:
             while True:
                 msg = self.q.get_nowait()
@@ -258,31 +260,31 @@ class App:
             self.status.configure(text=f"{shown:.0f}%  ·  {st['text']}  ·  {st['el'] + since:.0f} s elapsed, about {left:.0f} s left")
         self.root.after(100, self.pump)
 
-    def on_drop(self, event):
+    def on_drop(self, event: Any) -> None:
         paths = self.root.tk.splitlist(event.data)
         self.drop.configure(bg='#171a22')
         self.enqueue(paths)
 
-    def browse(self):
+    def browse(self) -> None:
         paths = filedialog.askopenfilenames(title='Choose demo files', filetypes=[('CS2 demos', '*.zst *.zip *.gz *.bz2 *.dem'), ('All files', '*.*')],
                                             initialdir=os.path.expanduser('~/Downloads'))
         self.enqueue(paths)
 
-    def show_who(self):
+    def show_who(self) -> None:
         s = self.settings
         if not s.get('steam64'):
             self.who.configure(text='No player set. Reports still build; they open on the first player.', fg='#9aa0ad'); return
         self.who.configure(text=f"{s.get('name') or '?'}  ({s.get('steam64')})  {'FACEIT linked' if s.get('faceit_id') else 'no FACEIT account'}", fg='#8fd18f')
 
-    def clear_profile(self):
+    def clear_profile(self) -> None:
         import cs2report
         cs2report.clear_settings(); self.settings = cs2report.load_settings(); self.profile_var.set('')
         self.show_who(); self.write('Player cleared. Enter a Steam profile URL to set one.'); self.refresh_matches()
 
-    def save_profile(self):
+    def save_profile(self) -> None:
         text = self.profile_var.get().strip()
         if not text: return
-        def job():
+        def job() -> None:
             import cs2report
             try:
                 sid, name = cs2report.resolve_steam(text)
@@ -295,11 +297,11 @@ class App:
                 self.write(f'Could not resolve that profile: {e}')
         threading.Thread(target=job, daemon=True).start()
 
-    def refresh_matches(self):
+    def refresh_matches(self) -> None:
         src = self.source.get()
         self.matches.delete(0, 'end'); self.match_rows = []
         self.matches.insert('end', 'loading ...')
-        def job():
+        def job() -> None:
             import cs2report
             rows = []
             try:
@@ -317,7 +319,7 @@ class App:
             except Exception as e:
                 msg = str(e)
                 rows.append(dict(label=msg if any(k in msg for k in ('no player set', 'no FACEIT')) else f"Could not list matches: {msg}", status='', path=None, ok=False, key=None))
-            def fill():
+            def fill() -> None:
                 self.matches.delete(0, 'end'); self.match_rows = rows
                 for row in rows:
                     self.matches.insert('end', row['label'] + row['status'])
@@ -325,7 +327,7 @@ class App:
             self.root.after(0, fill)
         threading.Thread(target=job, daemon=True).start()
 
-    def analyse_selected(self):
+    def analyse_selected(self) -> None:
         sel = [self.match_rows[i] for i in self.matches.curselection() if i < len(self.match_rows)]
         paths = [r['path'] for r in sel if r['ok'] and r['path']]
         pending = [r['path'] for r in sel if (not r['ok']) and r['path'] and str(r['path']).startswith('faceit:')]
@@ -337,7 +339,7 @@ class App:
         elif not pending:
             self.write('Select one or more matches.')
 
-    def monitor_folders(self):
+    def monitor_folders(self) -> None:
         """Event-driven: the OS notifies us of changes in Downloads (FACEIT .dem.zst) and the game's replays folder
         (Premier .dem). No polling. A new or renamed demo is confirmed finished by waiting for its size to settle."""
         import cs2report, folder_watch
@@ -345,14 +347,14 @@ class App:
         folders = [(os.path.expanduser('~/Downloads'), lambda n: n.startswith('1-') and n.endswith('.dem.zst'), 'Downloads')]
         rep = cs2report.cs2_replays_dir()
         if rep: folders.append((rep, lambda n: n.startswith('match730_') and n.endswith('.dem'), 'the replays folder'))
-        def make_cb(folder, match, label):
-            def cb(action, name):
+        def make_cb(folder: str, match: Callable[[str], bool], label: str) -> Callable[[str, str], None]:
+            def cb(action: str, name: str) -> None:
                 if not match(name): return
                 full = os.path.normcase(os.path.abspath(os.path.join(folder, name)))
                 if action in ('added', 'renamed_to', 'modified'):
                     if full in self.settling: return
                     self.settling.add(full)
-                    def confirm():
+                    def confirm() -> None:
                         size = folder_watch.settled(full, quiet=1.5, timeout=1800)
                         self.settling.discard(full)
                         if size is None: return
@@ -370,7 +372,7 @@ class App:
         self.watch_stops = [folder_watch.watch(folder, make_cb(folder, match, label)) for folder, match, label in folders]
         self.write('Watching Downloads' + (' and the replays folder' if rep else '') + ' for new demos.')
 
-    def mark_downloaded(self, full, present=True):
+    def mark_downloaded(self, full: str, present: bool = True) -> bool:
         """Update just the row that refers to this demo (status text, colour, payload). Selection and scroll position are kept.
         A Premier demo that is not in the list yet is inserted at the top."""
         key = os.path.normcase(os.path.abspath(full))
@@ -405,11 +407,11 @@ class App:
             return True
         return False
 
-    def fetch_by_code(self):
+    def fetch_by_code(self) -> None:
         code = self.code_var.get().strip()
         if code: self.download_premier(code)
 
-    def download_premier(self, code):
+    def download_premier(self, code: str) -> None:
         """Have the game download a Premier demo by share code; the folder watcher analyses it when it lands."""
         import cs2report
         try:
@@ -430,7 +432,7 @@ class App:
         except Exception as e:
             self.write('Could not launch through Steam (' + str(e) + '). Paste this into the CS2 console: ' + cmd)
 
-    def open_room_and_watch(self, match_id, expected):
+    def open_room_and_watch(self, match_id: str, expected: str) -> None:
         """FACEIT only hands demos to a logged-in browser session: open the room, and mark the demo as pending so the
         folder watcher analyses it the moment the download finishes."""
         url = f'https://www.faceit.com/en/cs2/room/{match_id}'
@@ -438,7 +440,7 @@ class App:
         self.pending = getattr(self, 'pending', {}); self.pending[os.path.normcase(os.path.abspath(expected))] = True
         self.write(f'Opened the FACEIT match room in your browser. Download the demo there; the row updates when {os.path.basename(expected)} lands in Downloads' + (' and it will be analysed automatically.' if self.auto_var.get() else '. Then select it and press Analyse.'))
 
-    def enqueue(self, paths):
+    def enqueue(self, paths: Iterable[str]) -> None:
         for p in paths:
             p = p.strip('{}')
             if not os.path.isfile(p):
@@ -448,7 +450,7 @@ class App:
             self.jobs.put(p); self.write(f'queued {os.path.basename(p)}')
 
     # ---- background worker
-    def worker(self):
+    def worker(self) -> None:
         while True:
             src = self.jobs.get()
             self.write('__busy__')
