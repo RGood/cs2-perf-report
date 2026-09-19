@@ -70,6 +70,7 @@ FACEIT demos must be downloaded by you from the match room (login required). The
 | `performance_report.py` | The page: team headers, player tabs, and per player a summary paragraph, average impact per round, round strip, chips, ranked lists, cards (SVG over a shared radar) |
 | `flags/` | Every flag, one Python file each, all with the same API (`KIND`, `SIDE`, `TITLE`, `WHY`, `DO`, `BASE`, `detect(c)`, optional `adjust(m, add)`). `flags/README.md` explains it; `flags/_template.py` is the starting point for a new flag; `_context.py` is what the flags share |
 | `constants.py` | Every constant more than one file uses (`TICK`, `M`, `CONT_GAP`, `SPRAY_RUN`, `SAFE_WINDOW` ...). Imports nothing, so anything can import it without a dependency loop |
+| `report_types.py` | Type aliases used across the project (`Demo`, `Card`, `XY`, `Add`, `Scored` ...). Imports nothing from the project. Every function is annotated and `mypy --ignore-missing-imports` passes; see `flags/README.md` |
 | `demolib.py` | Helpers over the parsed demo shared by the flags and the report modules (per-demo caches, grenade flights, teammate-fight analysis, the per-bullet inaccuracy table) |
 | `ensure_deps.py` | Run by both `.bat` launchers: installs what `requirements.txt` lists when a package is missing or too old |
 | `folder_watch.py` | Event-driven watching of the demo folders for the app |

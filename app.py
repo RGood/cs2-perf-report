@@ -137,8 +137,8 @@ class App:
         self.root.geometry('900x640')
         self.root.minsize(640, 520)
         self.root.configure(bg='#111318')
-        self.q = queue.Queue()
-        self.jobs = queue.Queue()
+        self.q: queue.Queue[Any] = queue.Queue()
+        self.jobs: queue.Queue[Any] = queue.Queue()
         self.busy = False
 
         style = ttk.Style(self.root)
@@ -157,10 +157,10 @@ class App:
         self.drop.pack(fill='x', padx=16, pady=8)
         self.drop.bind('<Button-1>', lambda e: self.browse())
         if HAVE_DND:
-            self.drop.drop_target_register(DND_FILES)
-            self.drop.dnd_bind('<<Drop>>', self.on_drop)
-            self.drop.dnd_bind('<<DragEnter>>', lambda e: self.drop.configure(bg='#1f2a3a'))
-            self.drop.dnd_bind('<<DragLeave>>', lambda e: self.drop.configure(bg='#171a22'))
+            self.drop.drop_target_register(DND_FILES)      # type: ignore[attr-defined]  # tkinterdnd2 adds these methods at run time
+            self.drop.dnd_bind('<<Drop>>', self.on_drop)      # type: ignore[attr-defined]
+            self.drop.dnd_bind('<<DragEnter>>', lambda e: self.drop.configure(bg='#1f2a3a'))      # type: ignore[attr-defined]
+            self.drop.dnd_bind('<<DragLeave>>', lambda e: self.drop.configure(bg='#171a22'))      # type: ignore[attr-defined]
 
         # ---- player profile
         import cs2report
@@ -194,7 +194,7 @@ class App:
         self.matches.pack(side='left', fill='x', expand=True)
         sb = ttk.Scrollbar(lbox, command=self.matches.yview); sb.pack(side='right', fill='y'); self.matches.configure(yscrollcommand=sb.set)
         self.matches.bind('<Double-Button-1>', lambda ev: self.analyse_selected())
-        self.match_rows = []
+        self.match_rows: list[Any] = []
         row = tk.Frame(self.root, bg='#111318'); row.pack(fill='x', padx=16, pady=(6, 0))
         self.auto_var = tk.BooleanVar(value=False)
         tk.Checkbutton(row, text='Analyse fetched matches when they arrive', variable=self.auto_var, fg='#cfd3dc', bg='#111318', selectcolor='#1d2130',
@@ -211,7 +211,7 @@ class App:
         self.write(f'Ready. Reports are written to {ROOT}')
         threading.Thread(target=self.worker, daemon=True).start()
         threading.Thread(target=self.startup_check, daemon=True).start()
-        self.pending = {}; self.settling = set()
+        self.pending: dict[str, bool] = {}; self.settling: set[str] = set()
         self.monitor_folders()
         self.root.after(300, self.refresh_matches)
         self.root.after(100, self.pump)
@@ -358,7 +358,7 @@ class App:
                         size = folder_watch.settled(full, quiet=1.5, timeout=1800)
                         self.settling.discard(full)
                         if size is None: return
-                        self.root.after(0, lambda f=full: self.mark_downloaded(f, True))
+                        self.root.after(0, self.mark_downloaded, full, True)
                         was_pending = self.pending.pop(full, None)
                         if was_pending and self.auto_var.get():
                             self.write(f'Demo ready in {label}: {name} ({size / 1e6:.0f} MB). Analysing, as you fetched it from here.'); self.enqueue([full])
@@ -366,7 +366,7 @@ class App:
                             self.write(f'Demo ready in {label}: {name} ({size / 1e6:.0f} MB). Marked as downloaded; select it and press Analyse when you want the report.')
                     threading.Thread(target=confirm, daemon=True).start()
                 elif action == 'removed':
-                    self.root.after(0, lambda f=full: self.mark_downloaded(f, False))
+                    self.root.after(0, self.mark_downloaded, full, False)
             return cb
         self.settling = set()
         self.watch_stops = [folder_watch.watch(folder, make_cb(folder, match, label)) for folder, match, label in folders]

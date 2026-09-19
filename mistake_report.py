@@ -220,7 +220,7 @@ def make_map(D: Demo, size: int = 900) -> tuple[dict[str, Any], Proj, float | No
     pad = 0.04 * max(xmax - xmin, ymax - ymin)
     xmin -= pad; xmax += pad; ymin -= pad; ymax += pad
     span = max(xmax - xmin, ymax - ymin)
-    def proj(x: float, y: float) -> XY:       # type: ignore[no-redef]   (the radar-image branch above returned)
+    def proj(x: float, y: float) -> XY:  # type: ignore[no-redef]  # the radar-image branch above has returned
         if x != x or y != y: return (-9999, -9999)
         return (int((x - xmin) / span * size), int((ymax - y) / span * size))
     img = Image.new('RGB', (size, size), (18, 20, 24))

@@ -12,7 +12,7 @@ from report_types import Card, Demo, Proj, Rules, XY
 import sys, os, re, argparse, html, json, time, math, pickle, tempfile, collections as C
 import concurrent.futures as CF
 for _s in (sys.stdout, sys.stderr):
-    try: _s.reconfigure(encoding='utf-8', errors='replace')    # player names can contain any Unicode; the pipe to the app is UTF-8
+    try: _s.reconfigure(encoding='utf-8', errors='replace')    # type: ignore[union-attr]  # player names can contain any Unicode; the pipe to the app is UTF-8
     except Exception: pass
 import mistake_report as MR
 import impact_report as IR
@@ -480,21 +480,21 @@ def player_body(pid: str, E: Demo, mistakes: list[Card], plays: list[Card], proj
             except TypeError: return False
         # replay: every player's last 12 s at 0.25 s steps plus every shot, in radar coordinates, for the in-page player
         rp: dict[str, Any] = dict(t0=-12.0, end=round(post, 2), rt=round(k[1] or 0, 1), mc=ME_COL, p=[], sh=[], marks=marks)
-        if tk is not None:
+        if tk is not None and tke is not None:
             dwin = dth[(dth['tick'] >= tk - 12 * 64) & (dth['tick'] <= tke + 8)]
             dead_at = {str(r.user_steamid): (int(r.tick), (float(r.user_X), float(r.user_Y))) for r in dwin.itertuples() if r.user_X == r.user_X and r.user_Y == r.user_Y}
             wall = snap[(snap['tick'] >= tk - 12 * 64) & (snap['tick'] <= tke) & (snap['is_alive'] == True)]
             team_of = {}
             for sid, g in wall.groupby('steamid'):
                 g = g.sort_values('tick'); team_of[str(sid)] = int(g['team_num'].iloc[-1])
-                rows = list(g.itertuples())
-                keep = rows[::2] + ([rows[-1]] if (len(rows) - 1) % 2 else [])
+                samples = list(g.itertuples())
+                keep = samples[::2] + ([samples[-1]] if (len(samples) - 1) % 2 else [])
                 smp = []
                 enemy = team_of[str(sid)] != my_team
-                for r in keep:
-                    if not (r.X == r.X and r.Y == r.Y): continue
-                    x, y = proj(r.X, r.Y); yaw = r.yaw if r.yaw == r.yaw else 0.0
-                    smp.append([round((int(r.tick) - tk) / 64, 2), x, y, int(yaw), int(enemy and sees_me(r.approximate_spotted_by))])
+                for snap_row in keep:
+                    if not (snap_row.X == snap_row.X and snap_row.Y == snap_row.Y): continue
+                    x, y = proj(snap_row.X, snap_row.Y); yaw = snap_row.yaw if snap_row.yaw == snap_row.yaw else 0.0
+                    smp.append([round((int(snap_row.tick) - tk) / 64, 2), x, y, int(yaw), int(enemy and sees_me(snap_row.approximate_spotted_by))])
                 if len(smp) < 2 and str(sid) not in dead_at: continue      # a single sample only matters when it ends in a death marker
                 ent = dict(n=str(g['name'].iloc[-1]), m=int(team_of[str(sid)] == my_team), me=int(sid == E['me']), s=smp)
                 bl = E['blind']; bw = bl[(bl['user_steamid'] == str(sid)) & (bl['tick'] >= tk - 12 * 64 - 6 * 64) & (bl['tick'] <= tke)]

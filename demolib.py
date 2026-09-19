@@ -150,7 +150,7 @@ def teammate_engagements(D: Demo, rn: int, team: int, me: str, gap_s: float = 3.
     h = hurt[(hurt['total_rounds_played'] == rn)]
     rd = deaths[deaths['total_rounds_played'] == rn]
     dead_at = {str(r.user_steamid): int(r.tick) for r in rd.itertuples()}
-    pairs = {}      # (teammate, enemy) -> damage ticks, whichever of the two was the attacker
+    pairs: dict[tuple[str, str], list[int]] = {}      # (teammate, enemy) -> damage ticks, whichever of the two was the attacker
     # team membership from the snapshot at the freeze tick
     g = by_tick_of(D).get(D['fz'][rn])
     if g is None: return []
@@ -211,7 +211,7 @@ def bullet_cones(D: Demo) -> tuple[dict[tuple[int, str], tuple[float, int, bool]
     if fb is not None and len(fb) and 'inaccuracy' in fb.columns:
         tab = ticktab_of(D); first = min(tab)
         gf = D['gunfire']; wpn = {(int(t), str(s)): str(w).replace('weapon_', '') for t, s, w in zip(gf['tick'], gf['user_steamid'], gf['weapon'])}
-        still = {}
+        still: dict[tuple[str, int | None], list[float]] = {}
         for r in fb.drop_duplicates(['tick', 'user_steamid']).itertuples():
             if not (r.inaccuracy == r.inaccuracy): continue
             t = int(r.tick); sid = str(r.user_steamid); cone = float(r.inaccuracy) + (float(r.spread) if r.spread == r.spread else 0.0)

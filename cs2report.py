@@ -27,7 +27,7 @@ OnProgress = Callable[[float, float, float, str], None]      # (percent, seconds
 OnLine = Callable[[str], None]
 import sys, os, json, glob, argparse, subprocess, datetime, urllib.request
 for _s in (sys.stdout, sys.stderr):
-    try: _s.reconfigure(encoding='utf-8', errors='replace')
+    try: _s.reconfigure(encoding='utf-8', errors='replace')      # type: ignore[union-attr]
     except Exception: pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -278,6 +278,7 @@ def run_with_progress(cmd: list[str], on_progress: OnProgress | None = None, on_
             msg = f"the demo parser crashed (exit code {e.code}); running the report again ({i + 2} of {attempts})"
             print(msg, file=sys.stderr, flush=True)
             if on_line: on_line(msg)
+    raise RuntimeError('the report was not run: attempts must be at least 1')
 
 
 def _run_with_progress(cmd: list[str], on_progress: OnProgress | None = None, on_line: OnLine | None = None) -> list[str]:
@@ -305,6 +306,7 @@ def _run_with_progress(cmd: list[str], on_progress: OnProgress | None = None, on
             bar = '#' * int(pct // 4) + '-' * (25 - int(pct // 4))
             sys.stdout.write(f"\r[{bar}] {pct:3.0f}%  {state['el'] + since:3.0f}s elapsed, ~{max(state['eta'] - since, 0):3.0f}s left  {state['msg']:<45}"); sys.stdout.flush()
     threading.Thread(target=ticker, daemon=True).start()
+    assert p.stdout is not None      # stdout=PIPE above
     for line in p.stdout:
         line = line.rstrip()
         if not line or 'Warning' in line: continue
@@ -313,7 +315,7 @@ def _run_with_progress(cmd: list[str], on_progress: OnProgress | None = None, on
             pct, el, eta = int(pct), int(el), int(eta)
             prev_pct, prev_at = state.get('pct'), state.get('at')
             step = (pct - prev_pct) if prev_pct is not None and pct > prev_pct else 6.0
-            dur = (_t.time() - prev_at) if prev_at is not None and pct > prev_pct else max(eta * step / max(100 - pct, 1), 0.5)
+            dur = (_t.time() - prev_at) if prev_at is not None and prev_pct is not None and pct > prev_pct else max(eta * step / max(100 - pct, 1), 0.5)
             state.update(pct=pct, el=el, eta=eta, msg=msg, at=_t.time(), step=step, dur=max(dur, 0.5), shown=max(state.get('shown', 0), pct))
             pct = int(state['shown'])
             if on_progress: on_progress(pct, el, eta, msg)

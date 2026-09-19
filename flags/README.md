@@ -12,10 +12,10 @@ WHY   = "..."                  # what is measured, every threshold named, and wh
 DO    = "..."                  # what to do about it (mistake) or keep doing (play)
 BASE  = 12                     # base score, 0 to 100
 
-def detect(c):                 # yield one card (a dict) per instance
+def detect(c: Ctx) -> Iterator[Card | None]:      # yield one card (a dict) per instance; a None is skipped
     ...
 
-def adjust(m, add):            # optional: flag-specific score modifiers, add(points, "reason")
+def adjust(m: Card, add: Add) -> None:            # optional: flag-specific score modifiers, add(points, "reason")
     ...
 ```
 
@@ -57,8 +57,21 @@ Optional attributes: `RETIRED = "why"` (kept for reference, not reported), `KEEP
 - State at a death (stance, ammo, airborne) is read at the last tick alive, `Death.last`, never at the death tick: there the player is already dead, the ammo is blank and `is_airborne` reads true for about half of all deaths.
 - Weapon accuracy comes from the game's own per-bullet record (`demolib.bullet_cones`, from the `fire_bullets` event), not from speed thresholds.
 
+## Types
+
+Every function is annotated. The aliases are in `../report_types.py` (`Demo`, `Card`, `XY`, `Add`, `Scored`, `Row`, `EventRow` ...), which imports nothing from the project; the shape of a flag file is the `FlagModule` protocol in `_types.py`; and `Ctx`, `Round`, `Death`, `Kill` and `DeathInDepth` declare their attributes at the top of each class, so an editor can complete `x.kpos` or `R.foes` and a checker can catch a misspelt one. The demo tables are pandas frames and the cards are plain dicts, so their contents are `Any`: the annotations say what a value is, they do not validate it.
+
+`c.rt(tick, rn)` returns a float and needs a round with a freeze end, which every `Round` from `c.rounds()` has; use `c.rt_or_none()` for a round number taken straight from an event. `Death.pos` is always set and `Death.killer` is `''` when the demo names no killer, while `Death.kpos`, `Death.nm` and `Kill.vpos` can be `None` and must be checked.
+
+To check the project (mypy is a development tool, not a requirement of the report):
+
+    pip install mypy
+    mypy --ignore-missing-imports constants.py report_types.py demolib.py mistake_report.py impact_report.py performance_report.py cs2report.py app.py folder_watch.py ensure_deps.py flags
+
+It passes with no issues; keep it that way when adding a flag.
+
 ## Shared files
 
-`_context.py` (the context, rounds, deaths, kills), `_shared.py` (helpers two or more flags use), `_score.py` (scoring), `_weapons.py` (weapon classes, hits-to-kill), `_economy.py` (freeze-time buy data), `_template.py` (start here). Demo-level helpers shared with the report modules are in `../demolib.py`, and every shared constant (`TICK`, `M`, `CONT_GAP`, `SPRAY_RUN`, `SAFE_WINDOW` ...) is in `../constants.py`, which imports nothing.
+`_context.py` (the context, rounds, deaths, kills), `_types.py` (the `FlagModule` protocol), `_shared.py` (helpers two or more flags use), `_score.py` (scoring), `_weapons.py` (weapon classes, hits-to-kill), `_economy.py` (freeze-time buy data), `_template.py` (start here). Demo-level helpers shared with the report modules are in `../demolib.py`, and every shared constant (`TICK`, `M`, `CONT_GAP`, `SPRAY_RUN`, `SAFE_WINDOW` ...) is in `../constants.py`, which imports nothing.
 
-Imports run one way, so no loop is possible: `constants` → `demolib` → `_weapons` / `_context` / `_economy` → `_shared` → the flag files → `flags/__init__.py` → `mistake_report` / `impact_report` → `performance_report`.
+Imports run one way, so no loop is possible: `constants` / `report_types` → `demolib` → `_weapons` / `_context` / `_economy` → `_shared` → the flag files → `flags/__init__.py` → `mistake_report` / `impact_report` → `performance_report`.
